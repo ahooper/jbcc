@@ -2,7 +2,6 @@ package ca.nevdull.jbcc3;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.regex.Pattern;
@@ -43,6 +42,7 @@ public class ClassPath {
     public InputStream getInputStream(String className) throws IOException, ClassNotFoundException {
     	String name = className.replace('.', '/') + ".class";
     	for (int i = 0;  i < pathList.length;  i++) {
+        	//System.out.println("ClassPath getInputStream "+pathList[i]);
     		if (zipList[i] != null) {
     			ZipEntry entry = zipList[i].getEntry(name);
     			if (entry != null) {

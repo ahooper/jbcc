@@ -14,7 +14,7 @@ import org.objectweb.asm.TypePath;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.analysis.AnalyzerException;
 
-public class ClassCompiler extends ClassVisitor implements Opcodes {
+public class ClassCompiler extends ClassVisitor implements Opcodes, CCode {
 
 	private ClassPath classpath;
 
@@ -36,7 +36,9 @@ public class ClassCompiler extends ClassVisitor implements Opcodes {
 	}
 
 	public void setOut(PrintWriter out) {
+		this.out.flush();
 		this.out = out;
+		methodCompiler.setOut(out);
 	}
 
 	void compile(String name)
@@ -71,7 +73,7 @@ public class ClassCompiler extends ClassVisitor implements Opcodes {
 		}
 	}
 
-	private String accessToString(int access) {
+	static String accessToString(int access) {
 		StringBuilder s = new StringBuilder();
 		if ((access & ACC_PUBLIC) != 0)		s.append("Pb");
 		if ((access & ACC_PRIVATE) != 0)	s.append("Pv");

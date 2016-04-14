@@ -60,6 +60,7 @@ public interface CCode {
 	static final String LIB_CHECK_CAST = "jbcc_check_cast";
 	static final String LIB_INIT_STRING_CONST = "jbcc_initStringConst";
 	static final String LIB_INSTANCEOF = "jbcc_instanceof";
+	static final String LIB_LOOKUPSWITCH = "jbcc_lookupswitch";
 	static final String LIB_MONITOR_EXIT = "jbcc_monitor_enter";
 	static final String LIB_MONITOR_ENTER = "jbcc_monitor_exit";
 	static final String LIB_NEW		= "jbcc_new";
