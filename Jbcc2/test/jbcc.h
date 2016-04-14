@@ -21,6 +21,7 @@ typedef int16_t		Short;
 #define Short_MAX	INT16_MAX
 #define Short_MIN	INT16_MIN
 typedef void*		Reference;
+#define null		((Reference)0)
 typedef void		Void;
 
 typedef struct o_java_lang_Class *java_lang_Class;
@@ -47,8 +48,8 @@ typedef struct SwitchPair {
 	LabelPtr l;
 } SwitchPair;
 typedef struct {
-	java_lang_string S;
-	Int 	L
+	java_lang_String S;
+	Int 	L;
 	Char	C[];
 } StringConst;
 
@@ -106,12 +107,12 @@ extern Int jbcc_irem(Int op1, Int op2);
 extern Long jbcc_ldiv(Long op1, Long op2);
 extern Long jbcc_lrem(Long op1, Long op2);
 extern LabelPtr jbcc_lookupswitch(Int value, int length, SwitchPair table[], LabelPtr defalt);
-extern void jbcc_check_cast(Reference obj,Class* klass);
+extern void jbcc_check_cast(Reference obj,struct Class* klass);
 extern java_lang_String jbcc_initStringConst(StringConst* scon);
-extern Boolean jbcc_instanceof(Reference obj,Class* klass);
+extern Boolean jbcc_instanceof(Reference obj,struct Class* klass);
 extern void jbcc_monitor_enter(Reference obj);
 extern void jbcc_monitor_exit(Reference obj);
-extern Reference jbcc_new(Class* klass);
+extern Reference jbcc_new(struct Class* klass);
 extern Reference jbcc_new_array_Boolean(Int count);
 extern Reference jbcc_new_array_Byte(Int count);
 extern Reference jbcc_new_array_Char(Int count);
@@ -120,8 +121,10 @@ extern Reference jbcc_new_array_Float(Int count);
 extern Reference jbcc_new_array_Int(Int count);
 extern Reference jbcc_new_array_Long(Int count);
 extern Reference jbcc_new_array_Short(Int count);
-extern Reference jbcc_new_array_object(Int count, Class* klass);
+extern Reference jbcc_new_array_object(Int count, struct Class* klass);
 extern void jbcc_throw(java_lang_Throwable throwable);
 extern void jbcc_ThrowArrayIndexOutOfBoundsException(Int index);
 extern void jbcc_throwDivisionByZero();
 extern void jbcc_throwNullPointerException();
+
+#endif /*JBCC_H*/
