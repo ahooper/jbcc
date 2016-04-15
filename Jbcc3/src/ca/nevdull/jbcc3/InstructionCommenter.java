@@ -1,21 +1,10 @@
 package ca.nevdull.jbcc3;
 
 import java.io.PrintWriter;
-import java.util.List;
-
-import org.objectweb.asm.Attribute;
 import org.objectweb.asm.Handle;
 import org.objectweb.asm.Label;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
-import org.objectweb.asm.tree.AbstractInsnNode;
-import org.objectweb.asm.tree.ClassNode;
-import org.objectweb.asm.tree.InsnList;
-import org.objectweb.asm.tree.MethodNode;
-import org.objectweb.asm.tree.analysis.Analyzer;
-import org.objectweb.asm.tree.analysis.AnalyzerException;
-import org.objectweb.asm.tree.analysis.BasicInterpreter;
-import org.objectweb.asm.tree.analysis.Frame;
 
 public class InstructionCommenter extends MethodVisitor {
 	static String[] OPCODES = org.objectweb.asm.util.Printer.OPCODES;
@@ -47,12 +36,12 @@ public class InstructionCommenter extends MethodVisitor {
 
 	@Override
 	public void visitTryCatchBlock(Label start, Label end, Label handler, String type) {
-		out.println("\tTryCatchBlock\t"+InstructionCompiler.makeLabel(start)+" "+InstructionCompiler.makeLabel(end)+" "+InstructionCompiler.makeLabel(handler)+" "+type);
+		out.println("\tTryCatchBlock\t"+MethodCompiler.makeLabel(start)+" "+MethodCompiler.makeLabel(end)+" "+MethodCompiler.makeLabel(handler)+" "+type);
 	}
 	
 	@Override
 	public void visitLineNumber(int line, Label start) {
-		out.println("\t// line\t"+line+" "+InstructionCompiler.makeLabel(start));
+		out.println("\t// line\t"+line+" "+MethodCompiler.makeLabel(start));
 	}
 
 	@Override
@@ -92,7 +81,7 @@ public class InstructionCommenter extends MethodVisitor {
 
 	@Override
 	public void visitJumpInsn(int opcode, Label label) {
-		out.println("\t// "+OPCODES[opcode]+"\t"+InstructionCompiler.makeLabel(label));
+		out.println("\t// "+OPCODES[opcode]+"\t"+MethodCompiler.makeLabel(label));
 	}
 
 	@Override
@@ -118,12 +107,12 @@ public class InstructionCommenter extends MethodVisitor {
 
 	@Override
 	public void visitTableSwitchInsn(int min, int max, Label defalt, Label... labels) {
-		out.println("\t// TableSwitch\t"+min+" "+max+" "+InstructionCompiler.makeLabel(defalt)+" "+labels.length);
+		out.println("\t// TableSwitch\t"+min+" "+max+" "+MethodCompiler.makeLabel(defalt)+" "+labels.length);
 	}
 
 	@Override
 	public void visitLookupSwitchInsn(Label defalt, int[] keys, Label[] labels) {
-		out.println("\t// LookupSwitch\t"+InstructionCompiler.makeLabel(defalt)+" "+keys.length+" "+labels.length);
+		out.println("\t// LookupSwitch\t"+MethodCompiler.makeLabel(defalt)+" "+keys.length+" "+labels.length);
 	}
 
 	@Override

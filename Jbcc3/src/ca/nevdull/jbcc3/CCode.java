@@ -33,8 +33,8 @@ public interface CCode {
 	static final String SWITCH_PAIR	= "SwitchPair";
 	static final String STRING_CONST = "StringConst";
 
-	static final String ARRAY_ELEMENTS = "E";
-	static final String ARRAY_LENGTH = "L";
+	static final String ARRAY_ELEMENTS 	= "E";
+	static final String ARRAY_LENGTH 	= "L";
 
 	static final String STRING_CONSTANT_STRING = "S";
 
@@ -61,8 +61,8 @@ public interface CCode {
 	static final String LIB_INIT_STRING_CONST = "jbcc_initStringConst";
 	static final String LIB_INSTANCEOF = "jbcc_instanceof";
 	static final String LIB_LOOKUPSWITCH = "jbcc_lookupswitch";
-	static final String LIB_MONITOR_EXIT = "jbcc_monitor_enter";
-	static final String LIB_MONITOR_ENTER = "jbcc_monitor_exit";
+	static final String LIB_MONITOR_ENTER = "jbcc_monitor_enter";
+	static final String LIB_MONITOR_EXIT = "jbcc_monitor_exit";
 	static final String LIB_NEW		= "jbcc_new";
 	static final String LIB_NEW_ARRAY_ = "jbcc_new_array_";
 	static final String LIB_NEW_ARRAY_OBJECT = "jbcc_new_array_object";

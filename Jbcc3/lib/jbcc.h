@@ -32,15 +32,17 @@ typedef struct o_java_lang_Throwable *java_lang_Throwable;
 struct Class {
 	int obj_Size;
 	char *name;
+	java_lang_Class klass;
 };
 
 typedef union {
-    Double d;
-    Float f;
-    Int i;
-    Long l;
-    void* a;
-    } Stack;
+    Double D;
+    Float F;
+    Int I;
+    Long L;
+    void* A;
+    void* O;
+} Stack;
 
 typedef void*		LabelPtr;
 typedef struct SwitchPair {
@@ -57,6 +59,7 @@ typedef struct monitor {
 	// TODO
 } Monitor;
 
+// TODO Arrays have to be subclasses of java/lang/Object
 typedef struct {
 	Int C;
 	Int L;
@@ -64,39 +67,39 @@ typedef struct {
 typedef struct {
 	Array_Head H;
 	Boolean	E[];
-} Array_Boolean;
+} *Array_Boolean;
 typedef struct {
 	Array_Head H;
 	Byte	E[];
-} Array_Byte;
+} *Array_Byte;
 typedef struct {
 	Array_Head H;
 	Char	E[];
-} Array_Char;
+} *Array_Char;
 typedef struct {
 	Array_Head H;
 	Double	E[];
-} Array_Double;
+} *Array_Double;
 typedef struct {
 	Array_Head H;
 	Float	E[];
-} Array_Float;
+} *Array_Float;
 typedef struct {
 	Array_Head H;
 	Int	E[];
-} Array_Int;
+} *Array_Int;
 typedef struct {
 	Array_Head H;
 	Long	E[];
-} Array_Long;
+} *Array_Long;
 typedef struct {
 	Array_Head H;
 	Short	E[];
-} Array_Short;
+} *Array_Short;
 typedef struct {
 	Array_Head H;
 	Reference	E[];
-} Array_Reference;
+} *Array_Reference;
 
 extern Int jbcc_d2i(Double op);
 extern Long jbcc_d2l(Double op);

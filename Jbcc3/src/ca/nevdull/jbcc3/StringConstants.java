@@ -8,8 +8,8 @@ import org.objectweb.asm.Opcodes;
 
 public class StringConstants extends MethodVisitor implements CCode {
 
-	private HashMap<String, String> stringConstants = new HashMap<String, String>();
 	private PrintWriter out;
+	private HashMap<String, String> stringConstants = new HashMap<String, String>();
 
 	public StringConstants(PrintWriter out) {
     	super(Opcodes.ASM5);
@@ -26,13 +26,7 @@ public class StringConstants extends MethodVisitor implements CCode {
     		String scon = (String)cst;
     		if (!stringConstants.containsKey(scon)) {
 		        String scn = STRING_CONSTANT_STRING+Integer.toString(System.identityHashCode(scon),36);
-		        out.print("static ");
-		        out.print(STRING_CONST);
-		        out.print(" ");
-		        out.print(scn);
-		        out.print(" = {0,");
-		        out.print(scon.length());
-		        out.print(",{");
+		        out.print("static "+STRING_CONST+" "+scn+" = {0,"+scon.length()+",{");
 		        String sep = "";
 		        for (char ch : scon.toCharArray()) {out.print(sep); sep = ","; out.print((int)ch); }
 		        out.print("}}; // ");
@@ -40,6 +34,8 @@ public class StringConstants extends MethodVisitor implements CCode {
 		        out.println((newline < 0) ? scon : scon.substring(0,newline));
 		        stringConstants.put(scon,scn);
     		}
+    	} else {
+    		//out.println("StringConstants visitLdcInsn "+cst.getClass().getSimpleName());
     	}
     }
 

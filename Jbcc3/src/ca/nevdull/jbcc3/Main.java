@@ -12,11 +12,12 @@ import org.objectweb.asm.tree.analysis.AnalyzerException;
 public class Main {
 
 	public static void main(final String[] args) throws Exception {
+		//System.out.println(System.getProperty("java.boot.class.path"));
+		//System.out.println(System.getProperty("sun.boot.class.path"));
 	    Main main = new Main();
 		main.run(args);
 	}
 
-	String opt_directory = null;
 	boolean opt_recurse = false;
 	private int numMissing;
 	private ClassCompiler classCompiler;
@@ -27,9 +28,9 @@ public class Main {
 				 argIter.hasNext(); ) {
 			String arg = argIter.next();
 			if (arg.equals("-cp")) {
-				classCompiler.setClasspath(new ClassPath(argIter.next()));
+				classCompiler.setClasspath(argIter.next());
 			} else if (arg.equals("-d")) {
-				opt_directory = argIter.next();
+				classCompiler.setOutDirectory(argIter.next());
 			} else if (arg.equals("-o")) {
 				String fileName = argIter.next();
 				try {
@@ -43,22 +44,23 @@ public class Main {
 				System.err.println("Unrecognized option: "+arg);
 			} else {
 	
-				if (classCompiler.getClasspath() == null) classCompiler.setClasspath(new ClassPath(System.getProperty("java.class.path")));
-	
 				try {
 					
 					classCompiler.compile(arg);
 					
+					if (opt_recurse) classCompiler.recurse();
+					
 		        } catch (IOException e) {
-		            System.err.println("Error loading class " + arg + " (" + e.getMessage() + ")");
+		            System.err.println("(" + arg +") " + e.getMessage());
 		            numMissing += 1;
 		        } catch (ClassNotFoundException e) {
-		            System.err.println("Class not found " + arg + " (" + e.getMessage() + ")");
-		            e.printStackTrace(System.err);
+		            System.err.println("(" + arg +") " + e.getMessage());
+		            //e.printStackTrace(System.err);
 		            numMissing += 1;
 				} catch (AnalyzerException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
+		            System.err.println("Class analysis failed " + e.getMessage());
+		            e.printStackTrace(System.err);
+		            numMissing += 1;
 				}
 			}
 	   }
