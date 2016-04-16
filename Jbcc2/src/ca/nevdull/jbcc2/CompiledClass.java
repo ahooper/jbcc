@@ -1,6 +1,9 @@
 package ca.nevdull.jbcc2;
 
-import java.io.PrintStream;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.Formatter;
 import java.util.HashMap;
 import org.apache.commons.bcel6.Const;
@@ -19,7 +22,7 @@ import org.apache.commons.bcel6.generic.*;
 
 public class CompiledClass extends org.apache.commons.bcel6.generic.EmptyVisitor {
 	private JavaClass klass;
-    private PrintStream out;
+    private PrintWriter out;
     private String className;
     ConstantPoolGen constPool;
 	String convClassName;
@@ -101,12 +104,14 @@ public class CompiledClass extends org.apache.commons.bcel6.generic.EmptyVisitor
 		this.analyzer = new StackAnalyzer(klass, out);
      }
     
-	public void header() {
+	public void header(File file) throws IOException {
+		setOut(file);
+		
 		out.println("#ifndef H_"+convClassName);
 		out.println("#define H_"+convClassName);
 		String superclassName = klass.getSuperclassName();
 		if (!superclassName.equals(className)) {
-			out.println("#include H_"+convertClassName(superclassName));
+			out.println("#include \""+classHeaderFileName(superclassName)+"\"");
 		}
         
 		// referenced class names
@@ -123,6 +128,7 @@ public class CompiledClass extends org.apache.commons.bcel6.generic.EmptyVisitor
 		        out.print(" *");
 		        out.print(crcn);
 		        out.println(";");
+				out.println("#include \""+classHeaderFileName(referencedClassName.replace('/', '.'))+"\"");
 		    }
 		}
 				
@@ -183,6 +189,27 @@ public class CompiledClass extends org.apache.commons.bcel6.generic.EmptyVisitor
         
 		out.println("#endif /*H_"+convClassName+"*/");
 		
+		out.flush();
+		if (file != null) out.close();
+		
+	}
+
+	private void setOut(File file) throws IOException {
+		if (file != null) {
+			File parent = file.getParentFile();
+			if (parent != null) parent.mkdirs();
+			this.out = new PrintWriter(file);
+		}
+	}
+
+	private String classHeaderFileName(String className) {
+		StringBuilder fileName = new StringBuilder();
+		int w = 0;
+		for (int x; (x = className.indexOf('.',w)) >= 0;  w = x+1) {
+			fileName.append(escapeName(className.substring(w,x))).append('/');
+		}
+		fileName.append(escapeName(className.substring(w))).append(main.FILE_SUFFIX_HEADER);
+		return fileName.toString();
 	}
 
 	static String escapeName(String name) {
@@ -288,9 +315,11 @@ public class CompiledClass extends org.apache.commons.bcel6.generic.EmptyVisitor
 
 	private HashMap<Constant, String> stringConstants = new HashMap<Constant, String>();
 
-	public void code() {
+	public void code(File file) throws IOException {
+		setOut(file);
+		
 		out.println("#include \""+LIB_H+"\"");
-		out.println("#include \""+convClassName+".h\"");
+		out.println("#include \""+classHeaderFileName(className)+"\"");
         
 		// String constants
 		int cpsize = constPool.getSize();
@@ -310,7 +339,8 @@ public class CompiledClass extends org.apache.commons.bcel6.generic.EmptyVisitor
 		        String sep = "";
 		        for (char ch : scon.toCharArray()) {out.print(sep); sep = ","; out.print((int)ch); }
 		        out.print("}}; // ");
-		        out.println(scon);
+		        int newline = scon.indexOf('\n');
+		        out.println((newline < 0) ? scon : scon.substring(0,newline));
 		        stringConstants.put(con,scn);
 		    }
 		}
@@ -346,6 +376,9 @@ public class CompiledClass extends org.apache.commons.bcel6.generic.EmptyVisitor
 		 }
 		 out.println("    }");
 		 out.println("};");
+			
+		out.flush();
+		if (file != null) out.close();
 		
 	}
 
@@ -1200,7 +1233,7 @@ public class CompiledClass extends org.apache.commons.bcel6.generic.EmptyVisitor
     }
 
 	private String convertField(ObjectType refType, String fieldName, String ref) {
-		return "(("+convertClassName(refType)+")"+ref+")->"+fieldName;
+		return "(("+convertClassName(refType)+")"+ref+")->"+escapeName(fieldName);
 	}
 
 	private void pushType(Type fieldType, String field) {

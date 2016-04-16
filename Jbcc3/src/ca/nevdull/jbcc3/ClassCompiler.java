@@ -5,6 +5,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayDeque;
+import java.util.HashSet;
 import java.util.zip.ZipException;
 
 import org.objectweb.asm.Opcodes;
@@ -64,7 +65,7 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 	
 	private ArrayDeque<String> classQueue = new ArrayDeque<String>();
 
-	public void recurse() throws ClassNotFoundException, IOException, AnalyzerException {
+	public void compileReferenced() throws ClassNotFoundException, IOException, AnalyzerException {
 		for (String name = classQueue.poll();  name != null;  name = classQueue.poll()) {
 	        compile(name);		
 		}
@@ -84,32 +85,34 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		if (cn.superName != null) {
 			out.println("#include \""+compiledFileName(cn.superName,FILE_SUFFIX_HEADER)+"\"");
 		}
-        out.println("typedef struct "+OBJECT_STRUCT_PREFIX+convClassName+" *"+convClassName+";");
-        out.println("typedef struct {");
-		out.println("    "+T_ARRAY_HEAD+" H;");
-		out.println("    "+convClassName+" "+ARRAY_ELEMENTS+"[];");
-        out.println("} *"+T_ARRAY_+convClassName+";");
+        declareType(cn.name);
 
 		//TODO Interfaces
 
-		ClassReferences references = new ClassReferences(out);
+        // type references
+        typeReferences.clear();
+		for (int fx = 0; fx < cn.fields.size(); ++fx) {
+            FieldNode field = cn.fields.get(fx);
+            typeReference(Type.getType(field.desc));
+		}
 		for (int mx = 0; mx < cn.methods.size(); ++mx) {
             MethodNode method = cn.methods.get(mx);
-            methodCompiler.compileClassReferences(method,references);
-            declareMethod(method, convClassName);
+    		for (Type argType : Type.getArgumentTypes(method.desc)) {
+    			typeReference(argType);
+    		}
+			typeReference(Type.getReturnType(method.desc));
+            //MOVED methodCompiler.compileClassReferences(method,references);
+            if ((method.access & Opcodes.ACC_STATIC) != 0) {
+            	declareMethod(method, cn.name);
+            }
         }
-		for (String ref : references) {
-			if (!classCache.contains(ref)) classQueue.add(ref);
-		}
 		
 		/*
 		cn.accept(this);
 		*/
         
         // virtual method table
-        out.print("struct "+METHOD_STRUCT_PREFIX);
-        out.print(convClassName);
-        out.println(" {");
+        out.println("struct "+METHOD_STRUCT_PREFIX+convClassName+" {");
 		for (int mx = 0; mx < cn.methods.size(); ++mx) {
             MethodNode method = cn.methods.get(mx);
 			 //TODO superclass methods that are not overridden
@@ -121,13 +124,9 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
         out.println("};");
         
         // class structure
-        out.print("extern struct "+CLASS_STRUCT_PREFIX);
-        out.print(convClassName);
-        out.println(" {");
+        out.println("extern struct "+CLASS_STRUCT_PREFIX+convClassName+" {");
         out.println("    struct "+CLASS_CLASS_STRUCT+" "+CLASS_CLASS+";");
-        out.print("    struct "+METHOD_STRUCT_PREFIX);
-        out.print(convClassName);
-        out.println(" "+CLASS_METHOD_TABLE+";");
+        out.println("    struct "+METHOD_STRUCT_PREFIX+convClassName+" "+CLASS_METHOD_TABLE+";");
         out.println("    struct {");
 		for (int fx = 0; fx < cn.fields.size(); ++fx) {
             FieldNode field = cn.fields.get(fx);
@@ -137,17 +136,11 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
         	}
         }
         out.println("    } "+CLASS_STATIC_FIELDS+";");
-        out.print("} "+CLASS_STRUCT_PREFIX);
-        out.print(convClassName);
-        out.println(";");
+        out.println("} "+CLASS_STRUCT_PREFIX+convClassName+";");
         
         // instance field declarations
-        out.print("struct "+OBJECT_STRUCT_PREFIX);
-        out.print(convClassName);
-        out.println(" {");
-        out.print("    struct "+CLASS_STRUCT_PREFIX);
-        out.print(convClassName);
-        out.println(" *"+OBJECT_CLASS+";");
+        out.println("struct "+OBJECT_STRUCT_PREFIX+convClassName+" {");
+        out.println("    struct "+CLASS_STRUCT_PREFIX+convClassName+" *"+OBJECT_CLASS+";");
         out.println("    "+MONITOR);
 		for (int fx = 0; fx < cn.fields.size(); ++fx) {
             FieldNode field = cn.fields.get(fx);
@@ -158,6 +151,10 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
         }
         out.println("};");
         //TODO inherited fields
+        out.println("struct "+ARRAY_STRUCT_PREFIX+convClassName+"{");
+		out.println("    "+T_ARRAY_HEAD+" H;");
+		out.println("    "+convClassName+" "+ARRAY_ELEMENTS+"[];");
+        out.println("};");
         
 		out.println("#endif /*H_"+convClassName+"*/");
 		
@@ -167,6 +164,13 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		
         out.println("#include \""+LIB_H+"\"");
 		out.println("#include \""+compiledFileName(cn.name,FILE_SUFFIX_HEADER)+"\"");
+		
+		// Collect all class references
+		ClassReferences references = new ClassReferences(out);
+		for (int mx = 0; mx < cn.methods.size(); ++mx) {
+            MethodNode method = cn.methods.get(mx);
+            methodCompiler.compileClassReferences(method,references);
+        }
 		
 		// Collect all string constants
 		for (int mx = 0; mx < cn.methods.size(); ++mx) {
@@ -178,37 +182,52 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		for (int mx = 0; mx < cn.methods.size(); ++mx) {
             MethodNode method = cn.methods.get(mx);
             methodCompiler.compileCode(cn, method);
-        }
+		}
         
-		 // class structure
-		 out.print("struct "+CLASS_STRUCT_PREFIX);
-		 out.print(convClassName);
-		 out.print(" "+CLASS_STRUCT_PREFIX);
-		 out.print(convClassName);
-		 out.println(" = {");
-		 out.println("    /*struct "+CLASS_CLASS_STRUCT+"*/ {");
-		 out.print("        sizeof(struct "+OBJECT_STRUCT_PREFIX);
-		 out.print(convClassName);
-		 out.println("),");
-		 out.print("        \"");
-		 out.print(cn.name);
-		 out.println("\" },");
-		 out.print("    /*struct "+METHOD_STRUCT_PREFIX);
-		 out.print(convClassName);
-		 out.println("*/ {");
-		 for (int mx = 0; mx < cn.methods.size(); ++mx) {
-			 MethodNode method = cn.methods.get(mx);
-			 //TODO superclass methods that are not overridden
-			 if ((method.access & Opcodes.ACC_STATIC) == 0) {
-				 out.print("        ");
-				 out.print(MethodCompiler.externalMethodName(convClassName, method));
-				 out.println(",");
-			}
-		 }
-		 out.println("    }");
-		 out.println("};");
+		// class structure
+		out.println("struct "+CLASS_STRUCT_PREFIX+convClassName+" "+CLASS_STRUCT_PREFIX+convClassName+" = {");
+		out.println("    ."+CLASS_CLASS+" = { /*struct Class*/");
+		out.println("        sizeof(struct "+OBJECT_STRUCT_PREFIX+convClassName+"),");
+		out.println("        \""+cn.name+"\" },");
+		out.println("    ."+CLASS_METHOD_TABLE+" = { /*struct "+METHOD_STRUCT_PREFIX+convClassName+"*/");
+		for (int mx = 0; mx < cn.methods.size(); ++mx) {
+			MethodNode method = cn.methods.get(mx);
+			//TODO superclass methods that are not overridden
+	        if ((method.access & Opcodes.ACC_ABSTRACT) != 0) {
+		 		out.println("        0/*ABSTRACT "+MethodCompiler.externalMethodName(cn.name, method)+"*/,");
+	        } else if ((method.access & Opcodes.ACC_STATIC) == 0) {
+		 		out.println("        "+MethodCompiler.externalMethodName(cn.name, method)+",");
+	 		}
+		}
+		out.println("    }");
+		out.println("};");
 		
-        out.flush();
+		out.flush();
+		 
+		for (String ref : references) {
+			if (!classCache.contains(ref)) classQueue.add(ref);
+		}
+
+	}
+
+	private void declareType(String className) {
+		String convClassName = MethodCompiler.convertClassName(className);
+		out.println("typedef struct "+OBJECT_STRUCT_PREFIX+convClassName+" *"+convClassName+";");
+		out.println("typedef struct "+ARRAY_STRUCT_PREFIX+convClassName+" *"+T_ARRAY_+convClassName+";");
+	}
+	
+	private HashSet<Type> typeReferences = new HashSet<Type>();
+	void typeReference(Type type) {
+		int s = type.getSort();
+		if (s == Type.OBJECT) {
+			if (!typeReferences.contains(type)) {
+				declareType(type.getInternalName());
+				typeReferences.add(type);
+			}
+		} else if (s == Type.ARRAY) {
+			Type elemType = type.getElementType();
+			typeReference(elemType);
+		}
 	}
 
 	static String compiledFileName(String owner, String suffix) {
@@ -221,9 +240,10 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		return fileName.append(suffix).toString();
 	}
     
-	private void declareMethod(MethodNode method, String convClassName) {
+	private void declareMethod(MethodNode method, String className) {
 		if ((method.access & Opcodes.ACC_NATIVE) != 0) out.print("/*NATIVE*/ ");
-		putMethodPrototype(MethodCompiler.externalMethodName(convClassName, method), method, convClassName);
+		out.print("extern ");
+		putMethodPrototype(MethodCompiler.externalMethodName(className, method), method, MethodCompiler.convertClassName(className));
 	}
     
 	private void declareMethodPointer(MethodNode method, String thisType) {

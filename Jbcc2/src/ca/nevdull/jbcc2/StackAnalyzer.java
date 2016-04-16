@@ -1,6 +1,5 @@
 package ca.nevdull.jbcc2;
 
-import java.io.PrintStream;
 import java.io.PrintWriter;
 
 /* Taken from org.apache.commons.bcel6.verifier.structurals.Pass3bVerifier
@@ -55,10 +54,10 @@ import org.apache.commons.bcel6.verifier.structurals.UninitializedObjectType;
 public class StackAnalyzer {
 	JavaClass jc;
 	private ConstantPoolGen constantPoolGen;
-	PrintStream out;
+	PrintWriter out;
 	public short[] stackSize;
 	
-    public StackAnalyzer(JavaClass jc, PrintStream out) {
+    public StackAnalyzer(JavaClass jc, PrintWriter out) {
 		this.jc = jc;
 		constantPoolGen = new ConstantPoolGen(jc.getConstantPool());
 		this.out = out;

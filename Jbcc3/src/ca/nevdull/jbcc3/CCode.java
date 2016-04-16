@@ -7,6 +7,7 @@ public interface CCode {
 	static final String LIB_H		= "jbcc.h";
 
 	static final String CLASS_STRUCT_PREFIX		= "c_";
+	static final String ARRAY_STRUCT_PREFIX		= "a_";
 	static final String METHOD_STRUCT_PREFIX	= "m_";
 	static final String OBJECT_STRUCT_PREFIX	= "o_";
 	static final String CLASS_CLASS 			= "C";

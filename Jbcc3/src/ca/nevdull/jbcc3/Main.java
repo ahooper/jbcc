@@ -10,20 +10,14 @@ import java.util.zip.ZipException;
 import org.objectweb.asm.tree.analysis.AnalyzerException;
 
 public class Main {
+	static boolean opt_debug = false;
 
-	public static void main(final String[] args) throws Exception {
-		//System.out.println(System.getProperty("java.boot.class.path"));
-		//System.out.println(System.getProperty("sun.boot.class.path"));
-	    Main main = new Main();
-		main.run(args);
-	}
+	public static void main(final String[] args) throws ZipException, IOException  {
 
-	boolean opt_recurse = false;
-	private int numMissing;
-	private ClassCompiler classCompiler;
-
-	private void run(final String[] args) throws ZipException, IOException {
-		classCompiler = new ClassCompiler();
+		boolean opt_referenced = false;
+		int numMissing = 0;
+		ClassCompiler classCompiler = new ClassCompiler();
+		
 		for (ListIterator<String> argIter = Arrays.asList(args).listIterator();
 				 argIter.hasNext(); ) {
 			String arg = argIter.next();
@@ -39,7 +33,9 @@ public class Main {
 					System.err.println(fileName+":"+e.getMessage());
 				}
 			} else if (arg.equals("-r")) {
-				opt_recurse = true;
+				opt_referenced = true;
+			} else if (arg.equals("-D")) {
+				opt_debug = true;
 			} else if (arg.startsWith("-")) {
 				System.err.println("Unrecognized option: "+arg);
 			} else {
@@ -48,7 +44,7 @@ public class Main {
 					
 					classCompiler.compile(arg);
 					
-					if (opt_recurse) classCompiler.recurse();
+					if (opt_referenced) classCompiler.compileReferenced();
 					
 		        } catch (IOException e) {
 		            System.err.println("(" + arg +") " + e.getMessage());

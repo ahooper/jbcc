@@ -60,38 +60,51 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
         	out.println();
         }
         
-        if ((method.access & Opcodes.ACC_NATIVE) != 0) {
-        	out.println("/*NATIVE*/");
+        if ((method.access & Opcodes.ACC_ABSTRACT) != 0) {
+        	out.println("/*ABSTRACT*/");
         	return;
         }
-        if ((method.access & Opcodes.ACC_ABSTRACT) != 0) return;  // does this occur?
-
+        
 		Type[] argTypes = Type.getArgumentTypes(method.desc);
 		Type returnType = Type.getReturnType(method.desc);
-        boolean virtual = (method.access & Opcodes.ACC_STATIC) == 0;
-		
+
+        if ((method.access & Opcodes.ACC_NATIVE) != 0) {
+			out.print("/*NATIVE*/ extern ");
+        } else if ((method.access & Opcodes.ACC_STATIC) == 0) {
+			out.print("static ");
+		}
         out.print(convertType(returnType));
 		out.print(" ");
 		out.print(externalMethodName(classNode.name, method));
 		out.print("(");
 
 		String sep = "";
-		if (virtual) {
+		argsEnd = 0;
+		if ((method.access & Opcodes.ACC_STATIC) == 0) {
         	out.print(convertClassName(classNode.name)/*this*/);
-        	out.print(" ");
+        	out.print(" ");  sep = ", ";
         	out.print(FRAME);
-        	out.print(0);
-        	sep = ", ";
+        	out.print(argsEnd++);
         }
-		int v = virtual ? 1 : 0;
         for (int i = 0;  i < argTypes.length;  i++) {
         	out.print(sep);  sep = ", ";
         	out.print(convertType(argTypes[i]));
         	out.print(" ");
         	out.print(FRAME);
-        	out.print(i+v);
+        	out.print(argsEnd++);
+            if (argTypes[i].getSize() == 2) argsEnd++;
+        }
+        if ((method.access & Opcodes.ACC_NATIVE) != 0) {
+    		out.println(");");
+    		return;
         }
 		out.println(") {");
+		out.print(T_STACK+" "+FRAME_SWAP);  // TODO omit _SWAP if no SWAP instruction present
+		int m = method.maxLocals + method.maxStack;
+		for (int n = argsEnd;  n < m;  n++) {
+			out.print(", "+FRAME+n);
+		}
+		out.println(";");
 		
 		InsnList ins = method.instructions;
 		if (ins.size() > 0) {
@@ -100,8 +113,12 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		    for (int fx = 0; fx < frames.length; ++fx) {
 		    	frame = frames[fx];
 		    	AbstractInsnNode insn = ins.get(fx);
-		    	insn.accept(insnCommenter);  
-				//out.println(frame);
+		    	insn.accept(insnCommenter);
+		    	if (frame == null) {
+		    		out.println("// DEAD CODE");
+		    		continue;
+		    	}
+				if (Main.opt_debug) out.println("\t// "+frame);
 				insn.accept(this);
 		    }
 		}
@@ -145,41 +162,9 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	public static String convertType(String desc) {
 		return convertType(Type.getType(desc));
 	}
-/*
-
-	@Override
-	public void visitParameter(String name, int access) {
-		out.println("\tParameter\t"+name+" "+access);
-	}
-
-	@Override
-	public void visitAttribute(Attribute attr) {
-		out.println("\tattribute\t"+attr.type);
-	}
-
-	@Override
-	public void visitTryCatchBlock(Label start, Label end, Label handler, String type) {
-		out.println("\tTryCatchBlock\t"+makeLabel(start)+" "+makeLabel(end)+" "+makeLabel(handler)+" "+type);
-	}
-
-	@Override
-	public void visitLocalVariable(String name, String desc, String signature, Label start, Label end, int index) {
-		if (signature==null) signature = "";  // not generic
-		out.println("\tLocalVariable\t"+name+" "+desc+" "+signature+" "+makeLabel(start)+" "+makeLabel(end)+" "+index);
-	}
-
-	@Override
-	public void visitMaxs(int maxStack, int maxLocals) {
-		out.println("\tMaxs\t"+maxStack+" "+maxLocals);
-	}
-
-	@Override
-	public void visitEnd() {
-		out.println("\tEnd");
-	}
-*/
 	
 	Frame<BasicValue> frame;
+	int argsEnd;
 	
 	String stack(int d, Type type) {
 		String variant;  int width = 1;
@@ -212,38 +197,47 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	}
 
 	private String stack(int d, String variant, int width) {
-		int loc = frame.getStackSize() - d*width + frame.getLocals();
+		int loc = frame.getLocals() + frame.getStackSize() - d;
+		// *width is not needed, because asm.tree.analysis.Frame does not use two stack slots
+		// for double-word values. it does reserve a dummy slot in locals
 		return FRAME+loc+variant;
 	}
 	
+	private boolean stackCategory2(int d) {
+		return frame.getStack(frame.getStackSize() - d).getSize() == 2;
+	}
+	
 	String local(int n, Type type) {
-		String v;  int w = 1;
+		if (n < argsEnd) {
+			return FRAME+n;  // arguments don't have varying types
+		}
+		String variant;
         switch (type.getSort()) {
         case Type.BOOLEAN:
         case Type.CHAR:
         case Type.BYTE:
         case Type.SHORT:
+        	// all above treated as INT
         case Type.INT:
-            v = ".I";
+            variant = FRAME_INT;
             break;
         case Type.FLOAT:
-            v = ".F";
+            variant = FRAME_FLOAT;
             break;
         case Type.LONG:
-            v = ".L";  w = 2;
+            variant = FRAME_LONG;
             break;
         case Type.DOUBLE:
-            v = ".D";  w = 2;
+            variant = FRAME_DOUBLE;
             break;
         case Type.ARRAY:
-            v = ".A";
+            variant = FRAME_ARRAY;
             break;
         // case Type.OBJECT:
         default:
-            v = ".O";
+            variant = FRAME_OBJECT;
         }
-		int l = n;  //TODO direct type for arguments
-		return "_"+n+v;		
+		return FRAME+n+variant;		
 	}
 
 
@@ -310,7 +304,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void anew(Type type) {
-		emit(stack(0,type)+" = "+LIB_NEW+"("+classPointer(type)+");");
+		emit(stack(0,type)+" = "+LIB_NEW+"("+classPointer(type)+"."+CLASS_CLASS+");");
 	}
 
 	private String classPointer(Type type) {
@@ -346,47 +340,47 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void cast(Type from, Type to) {
-		String f = stack(1,from), t;
+		String v = stack(1,from), r;
         if (from == Type.DOUBLE_TYPE) {
             if (to == Type.FLOAT_TYPE) {
-            	t = "("+T_FLOAT+")"+f;
+            	r = "("+T_FLOAT+")"+v;
             } else if (to == Type.LONG_TYPE) {
-                t = LIB_D2L+"("+f+")";
+                r = LIB_D2L+"("+v+")";
             } else {
-                t = LIB_D2I+"("+f+")";
+                r = LIB_D2I+"("+v+")";
             }
         } else if (from == Type.FLOAT_TYPE) {
             if (to == Type.DOUBLE_TYPE) {
-            	t = "("+T_DOUBLE+")"+f;
+            	r = "("+T_DOUBLE+")"+v;
             } else if (to == Type.LONG_TYPE) {
-                t = LIB_F2L+"("+f+")";
+                r = LIB_F2L+"("+v+")";
             } else {
-                t = LIB_F2I+"("+f+")";
+                r = LIB_F2I+"("+v+")";
             }
         } else if (from == Type.LONG_TYPE) {
         	if (to == Type.DOUBLE_TYPE) {
-            	t = "("+T_DOUBLE+")"+f;
+            	r = "("+T_DOUBLE+")"+v;
             } else if (to == Type.FLOAT_TYPE) {
-            	t = "("+T_FLOAT+")"+f;
+            	r = "("+T_FLOAT+")"+v;
             } else {
-            	t = "("+T_INT+")"+f;
+            	r = "("+T_INT+")"+v;
             }
         } else {
             if (to == Type.BYTE_TYPE) {
-            	t = "("+T_BYTE+")"+f;
+            	r = "("+T_BYTE+")"+v;
             } else if (to == Type.CHAR_TYPE) {
-            	t = "("+T_CHAR+")"+f;
+            	r = "("+T_CHAR+")"+v;
             } else if (to == Type.DOUBLE_TYPE) {
-            	t = "("+T_DOUBLE+")"+f;
+            	r = "("+T_DOUBLE+")"+v;
             } else if (to == Type.FLOAT_TYPE) {
-            	t = "("+T_FLOAT+")"+f;
+            	r = "("+T_FLOAT+")"+v;
             } else if (to == Type.LONG_TYPE) {
-            	t = "("+T_LONG+")"+f;
+            	r = "("+T_LONG+")"+v;
             } else if (to == Type.SHORT_TYPE) {
-            	t = "("+T_SHORT+")"+f;
+            	r = "("+T_SHORT+")"+v;
             } else return;  // INT to INT
         }
-		emit(stack(1,to)+" = "+t+";");
+		emit(stack(1,to)+" = "+r+";");
 	}
 
 	@Override
@@ -445,15 +439,20 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		//	Form 2:
 		//	..., value →
 		//	..., value, value
-		//	where value is a value of a category 2 computational type (§2.11.1). 
-        String s1 = stack(1,FRAME_ANY,1);
-        String s2 = stack(2,FRAME_ANY,1);
-		String s0 = stack(0,FRAME_ANY,1);
-		String sm = stack(-1,FRAME_ANY,1);
-		emit(sm+" = "+s1+";");
-		emit(s0+" = "+s2+";");
-		emit(s2+" = "+s0+";");
-		//TODO does this work for Form 2?
+		//	where value is a value of a category 2 computational type (§2.11.1).
+		if (stackCategory2(1)) {  // Form 2
+	        String s1 = stack(1,FRAME_ANY,1);
+			String s0 = stack(0,FRAME_ANY,1);
+			emit(s0+" = "+s1+";");
+		} else {
+	        String s1 = stack(1,FRAME_ANY,1);
+	        String s2 = stack(2,FRAME_ANY,1);
+			String s0 = stack(0,FRAME_ANY,1);
+			String sm = stack(-1,FRAME_ANY,1);
+			emit(sm+" = "+s1+";");
+			emit(s0+" = "+s2+";");
+			emit(s2+" = "+s0+";");
+		}
 	}
 
 	@Override
@@ -466,17 +465,25 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		//	..., value2, value1 →
 		//	..., value1, value2, value1
 		//	where value1 is a value of a category 2 computational type and value2 is a value of a category 1 computational type 	
-        String s1 = stack(1,FRAME_ANY,1);
-        String s2 = stack(2,FRAME_ANY,1);
-        String s3 = stack(3,FRAME_ANY,1);
-		String s0 = stack(0,FRAME_ANY,1);
-		String sm = stack(-1,FRAME_ANY,1);
-		emit(sm+" = "+s1+";");
-		emit(s0+" = "+s2+";");
-		emit(s1+" = "+s3+";");
-		emit(s2+" = "+sm+";");
-		emit(s3+" = "+s0+";");
-		//TODO does this work for Form 2?
+		if (stackCategory2(1)) {  // Form 2
+	        String s1 = stack(1,FRAME_ANY,1);
+	        String s2 = stack(2,FRAME_ANY,1);
+			String s0 = stack(0,FRAME_ANY,1);
+			emit(s0+" = "+s1+";");
+			emit(s1+" = "+s2+";");
+			emit(s2+" = "+s0+";");
+		} else {
+	        String s1 = stack(1,FRAME_ANY,1);
+	        String s2 = stack(2,FRAME_ANY,1);
+	        String s3 = stack(3,FRAME_ANY,1);
+			String s0 = stack(0,FRAME_ANY,1);
+			String sm = stack(-1,FRAME_ANY,1);
+			emit(sm+" = "+s1+";");
+			emit(s0+" = "+s2+";");
+			emit(s1+" = "+s3+";");
+			emit(s2+" = "+sm+";");
+			emit(s3+" = "+s0+";");
+		}
 	}
 
 	@Override
@@ -497,19 +504,49 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		//	..., value2, value1 →
 		//	..., value1, value2, value1
 		//	where value1 and value2 are both values of a category 2 computational type (§2.11.1).
-        String s1 = stack(1,FRAME_ANY,1);
-        String s2 = stack(2,FRAME_ANY,1);
-        String s3 = stack(3,FRAME_ANY,1);
-        String s4 = stack(4,FRAME_ANY,1);
-		String s0 = stack(0,FRAME_ANY,1);
-		String sm = stack(-1,FRAME_ANY,1);
-		emit(sm+" = "+s1+";");
-		emit(s0+" = "+s2+";");
-		emit(s1+" = "+s3+";");
-		emit(s2+" = "+s4+";");
-		emit(s3+" = "+sm+";");
-		emit(s4+" = "+s0+";");
-		//TODO does this work for Forms 2, 3 & 4?
+		if (stackCategory2(1)) {
+			if (stackCategory2(2)) { // Form 4
+		        String s1 = stack(1,FRAME_ANY,1);
+		        String s2 = stack(2,FRAME_ANY,1);
+				String s0 = stack(0,FRAME_ANY,1);
+				emit(s0+" = "+s1+";");
+				emit(s1+" = "+s2+";");
+				emit(s2+" = "+s0+";");
+			} else { // Form 2
+		        String s1 = stack(1,FRAME_ANY,1);
+		        String s2 = stack(2,FRAME_ANY,1);
+		        String s3 = stack(3,FRAME_ANY,1);
+				String s0 = stack(0,FRAME_ANY,1);
+				emit(s0+" = "+s1+";");
+				emit(s1+" = "+s2+";");
+				emit(s2+" = "+s3+";");
+				emit(s3+" = "+s0+";");
+			}
+		} else if (stackCategory2(3)) { // Form 3
+	        String s1 = stack(1,FRAME_ANY,1);
+	        String s2 = stack(2,FRAME_ANY,1);
+	        String s3 = stack(3,FRAME_ANY,1);
+			String s0 = stack(0,FRAME_ANY,1);
+			String sm = stack(-1,FRAME_ANY,1);
+			emit(sm+" = "+s1+";");
+			emit(s0+" = "+s2+";");
+			emit(s1+" = "+s3+";");
+			emit(s2+" = "+sm+";");
+			emit(s3+" = "+s0+";");
+		} else {
+	        String s1 = stack(1,FRAME_ANY,1);
+	        String s2 = stack(2,FRAME_ANY,1);
+	        String s3 = stack(3,FRAME_ANY,1);
+	        String s4 = stack(4,FRAME_ANY,1);
+			String s0 = stack(0,FRAME_ANY,1);
+			String sm = stack(-1,FRAME_ANY,1);
+			emit(sm+" = "+s1+";");
+			emit(s0+" = "+s2+";");
+			emit(s1+" = "+s3+";");
+			emit(s2+" = "+s4+";");
+			emit(s3+" = "+sm+";");
+			emit(s4+" = "+s0+";");
+		}
 	}
 
 	@Override
@@ -534,15 +571,23 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		//	..., value2, value1 →
 		//	..., value1, value2, value1
 		//	where value1 is a value of a category 1 computational type and value2 is a value of a category 2 computational type (§2.11.1). 
-        String s1 = stack(1,FRAME_ANY,1);
-        String s2 = stack(2,FRAME_ANY,1);
-        String s3 = stack(3,FRAME_ANY,1);
-		String s0 = stack(0,FRAME_ANY,1);
-		emit(s0+" = "+s1+";");
-		emit(s1+" = "+s2+";");
-		emit(s2+" = "+s3+";");
-		emit(s3+" = "+s0+";");
-		//TODO does this work for Form 2?
+		if (stackCategory2(1)) { // Form 2
+	        String s1 = stack(1,FRAME_ANY,1);
+	        String s2 = stack(2,FRAME_ANY,1);
+			String s0 = stack(0,FRAME_ANY,1);
+			emit(s0+" = "+s1+";");
+			emit(s1+" = "+s2+";");
+			emit(s2+" = "+s0+";");
+		} else {
+	        String s1 = stack(1,FRAME_ANY,1);
+	        String s2 = stack(2,FRAME_ANY,1);
+	        String s3 = stack(3,FRAME_ANY,1);
+			String s0 = stack(0,FRAME_ANY,1);
+			emit(s0+" = "+s1+";");
+			emit(s1+" = "+s2+";");
+			emit(s2+" = "+s3+";");
+			emit(s3+" = "+s0+";");
+		}
 	}
 
 	@Override
@@ -770,16 +815,17 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		int numArgs = argTypes.length;
 		int reserve = virtual ? 1 : 0;
 		String[] argList = new String[reserve+numArgs];
-		int d = 1;
+		int d = 0;
 		for (int i = numArgs-1;  i >= 0;  --i) {
 			Type argType = argTypes[i];
-			argList[reserve+i] = stack(d++,argType);
-			if (argType == Type.DOUBLE_TYPE || argType == Type.LONG_TYPE) d++;  // kludgy!!
+			argList[reserve+i] = stack(++d,argType);
+			// arguments being passed are on stack, and asm.tree.analysis.Frame does not
+			// reserve a second slot there for category 2 values
 		}
 		StringBuilder call = new StringBuilder();
 		String prefix;
 		if (virtual) {
-			String ref = stack(d,OBJECT_PSEUDO_TYPE);
+			String ref = stack(++d,OBJECT_PSEUDO_TYPE);
 			argList[0] = ref;
 			checkReference(ref);
 			prefix = "(("+convertClassName(owner)+")"+ref+")->"+OBJECT_CLASS+"->"+CLASS_METHOD_TABLE+".";
@@ -798,7 +844,6 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			emit(call.toString()+";");
 		} else {
 			emit(stack(d,retType)+" = "+call.toString()+";");
-			//TODO stack position calculation is wrong for wide result or any wide arguments!
 		}
 	}
 
@@ -872,20 +917,44 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void newarray(Type type) {
+		Type aType;
 		String at;
-		if (type == Type.BOOLEAN_TYPE) at = T_BOOLEAN;
-		else if (type == Type.BYTE_TYPE) at = T_BYTE;
-		else if (type == Type.CHAR_TYPE) at = T_CHAR;
-		else if (type == Type.DOUBLE_TYPE) at = T_DOUBLE;
-		else if (type == Type.FLOAT_TYPE) at = T_FLOAT;
-		else if (type == Type.INT_TYPE) at = T_INT;
-		else if (type == Type.LONG_TYPE) at = T_LONG;
-		else if (type == Type.SHORT_TYPE) at = T_SHORT;
-		else { // Object
-			emit(stack(1,type)+" = "+LIB_NEW_ARRAY_OBJECT+"("+stack(1,Type.INT_TYPE)+","+classPointer(type)+");");
+        switch (type.getSort()) {
+        case Type.BOOLEAN:
+        	at = T_BOOLEAN; aType = Type.getType("[Z");
+        	break;
+        case Type.CHAR:
+        	at = T_CHAR; aType = Type.getType("[C");
+        	break;
+        case Type.BYTE:
+        	at = T_BYTE; aType = Type.getType("[B");
+        	break;
+        case Type.SHORT:
+        	at = T_SHORT; aType = Type.getType("[S");
+        	break;
+        case Type.INT:
+        	at = T_INT; aType = Type.getType("[I");
+            break;
+        case Type.FLOAT:
+        	at = T_FLOAT; aType = Type.getType("[F");
+            break;
+        case Type.LONG:
+        	at = T_LONG; aType = Type.getType("[J");
+            break;
+        case Type.DOUBLE:
+        	at = T_DOUBLE; aType = Type.getType("[D");
+            break;
+        case Type.ARRAY:
+        	at = T_BOOLEAN; aType = Type.getType("[Z");
+            break;
+        // case Type.OBJECT:
+        default:
+        	// we don't have a T_ for objects, so this finishes the method here
+        	aType = Type.getType("["+type.getDescriptor());
+			emit(stack(1,aType)+" = "+LIB_NEW_ARRAY_OBJECT+"("+stack(1,Type.INT_TYPE)+","+classPointer(type)+");");
 			return;
 		}
-		emit(stack(1,type)+" = "+LIB_NEW_ARRAY_+at+"("+stack(1,Type.INT_TYPE)+");");
+		emit(stack(1,aType)+" = "+LIB_NEW_ARRAY_+at+"("+stack(1,Type.INT_TYPE)+");");
 	}
 
 	@Override
@@ -956,11 +1025,12 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void store(int lclIndex, Type type) {
-		String trunc = "";
+		String trunc;
 		if (type == Type.BOOLEAN_TYPE) trunc = "("+T_BOOLEAN+")";
 		else if (type == Type.BYTE_TYPE) trunc = "("+T_BYTE+")";
 		else if (type == Type.CHAR_TYPE) trunc = "("+T_CHAR+")";
 		else if (type == Type.SHORT_TYPE) trunc = "("+T_SHORT+")";
+		else trunc = "";
 		emit(local(lclIndex,type)+" = "+trunc+stack(1,type)+";");
 	}
 

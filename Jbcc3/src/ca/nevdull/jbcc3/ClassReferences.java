@@ -8,7 +8,7 @@ import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
-public class ClassReferences extends MethodVisitor implements CCode, Iterable<String> {
+public class ClassReferences extends MethodVisitor implements Iterable<String> {
 
 	private PrintWriter out;
 	private HashSet<String> classReferences = new HashSet<String>();
@@ -40,13 +40,12 @@ public class ClassReferences extends MethodVisitor implements CCode, Iterable<St
 		classReference(owner);
 	}
 
-	private void classReference(String owner) {
+	void classReference(String owner) {
+		if (Main.opt_debug) System.out.println("classReference "+owner);
 		if (owner.charAt(0) == 'L') {
 			System.err.println("Reference "+owner);
 		}
 		if (!classReferences.contains(owner)) {
-	        String crcn = MethodCompiler.convertClassName(owner);
-	        //out.println("typedef struct "+OBJECT_STRUCT_PREFIX+crcn+" *"+crcn+";");
 			out.println("#include \""+ClassCompiler.compiledFileName(owner,ClassCompiler.FILE_SUFFIX_HEADER)+"\"");
 			classReferences.add(owner);
 		}

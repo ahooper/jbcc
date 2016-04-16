@@ -1,8 +1,9 @@
 package ca.nevdull.jbcc2;
 
+import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.PrintStream;
+import java.io.PrintWriter;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.ListIterator;
@@ -21,9 +22,13 @@ public class Main {
 
 	ClassPath opt_classpath = new ClassPath(System.getProperty("java.class.path"));
 	public SyntheticRepository repo = SyntheticRepository.getInstance(opt_classpath);
-	boolean opt_verbose = false;
+	String opt_directory = null;
+	PrintWriter opt_out = new PrintWriter(System.out);
 	boolean opt_recurse = false;
-	PrintStream opt_out = System.out;
+	boolean opt_verbose = false;
+
+	static final String FILE_SUFFIX_HEADER = ".h";
+	static final String FILE_SUFFIX_CODE = ".c";
 
 	public static void main(String[] args) throws ClassNotFoundException, IOException {
 		Main main = new Main();
@@ -34,25 +39,25 @@ public class Main {
 	
 	public void run(String[] args) throws IOException {
 		
-		// process arguments
 		for (ListIterator<String> argIter = Arrays.asList(args).listIterator();
 				 argIter.hasNext(); ) {
 			String arg = argIter.next();
 			if (arg.equals("-cp")) {
 				opt_classpath = new ClassPath(argIter.next());
 				repo = SyntheticRepository.getInstance(opt_classpath);
+			} else if (arg.equals("-d")) {
+				opt_directory = argIter.next();
 			} else if (arg.equals("-o")) {
-				String file = argIter.next();
+				String fileName = argIter.next();
 				try {
-					opt_out = new PrintStream(file);
+					opt_out = new PrintWriter(fileName);
 				} catch (FileNotFoundException e) {
-					System.err.println(file+":"+e.getMessage());
-					opt_out = System.out;
+					System.err.println(fileName+":"+e.getMessage());
 				}
-			} else if (arg.equals("-v")) {
-				opt_verbose = true;
 			} else if (arg.equals("-r")) {
 				opt_recurse = true;
+			} else if (arg.equals("-v")) {
+				opt_verbose = true;
 			} else if (arg.startsWith("-")) {
 				System.err.println("Unrecognized option: "+arg);
 			} else {
@@ -99,8 +104,9 @@ public class Main {
         compiledClasses.put(name, compiled);
 		
 		System.out.println("---------- "+name);  System.out.flush();
-		compiled.header();
-        compiled.code();
+		String fileName = name.replace('.', File.separatorChar);
+		compiled.header(new File(opt_directory,fileName+FILE_SUFFIX_HEADER));
+        compiled.code(new File(opt_directory,fileName+FILE_SUFFIX_CODE));
         
         if (opt_recurse) {
         	// Compile referenced classes
