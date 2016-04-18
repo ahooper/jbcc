@@ -27,6 +27,7 @@ public interface CCode {
 	static final String T_SHORT		= "Short";
 	static final String T_VOID		= "Void";
 	static final String T_STACK		= "Stack";
+	static final String T_OBJECT	= "Object";
 	static final String T_ARRAY_HEAD	= T_ARRAY_+"Head";
 
 	static final String MONITOR		= "Monitor *monitor;";

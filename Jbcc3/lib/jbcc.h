@@ -27,9 +27,9 @@ typedef void		Void;
 typedef struct o_java_lang_Class *java_lang_Class;
 typedef struct o_java_lang_Object *java_lang_Object;
 typedef struct o_java_lang_String *java_lang_String;
-//typedef struct o_java_lang_StringBuilder *java_lang_StringBuilder;
 typedef struct o_java_lang_Throwable *java_lang_Throwable;
-typedef struct o_java_lang_Exception *java_lang_Exception;
+
+typedef void*	Object;
 
 struct Class {
 	int obj_Size;
@@ -43,7 +43,7 @@ typedef union {
     Int I;
     Long L;
     void* A;
-    void* O;
+    Object O;
 } Stack;
 
 typedef void*		LabelPtr;

@@ -70,7 +70,8 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
         if ((method.access & Opcodes.ACC_NATIVE) != 0) {
 			out.print("/*NATIVE*/ extern ");
-        } else if ((method.access & Opcodes.ACC_STATIC) == 0) {
+        } else if (   /*(method.access & Opcodes.ACC_STATIC) == 0
+        		   || */(method.access & Opcodes.ACC_PRIVATE) != 0) {
 			out.print("static ");
 		}
         out.print(convertType(returnType));
@@ -99,12 +100,16 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
     		return;
         }
 		out.println(") {");
-		out.print(T_STACK+" "+FRAME_SWAP);  // TODO omit _SWAP if no SWAP instruction present
+		//out.print(T_STACK+" "+FRAME_SWAP);  sep = ", ";
 		int m = method.maxLocals + method.maxStack;
-		for (int n = argsEnd;  n < m;  n++) {
-			out.print(", "+FRAME+n);
+		if (m > argsEnd) {
+			out.print(T_STACK);  sep = " ";
+			for (int n = argsEnd;  n < m;  n++) {
+	        	out.print(sep);  sep = ", ";
+				out.print(FRAME+n);
+			}
+			out.println(";");
 		}
-		out.println(";");
 		
 		InsnList ins = method.instructions;
 		if (ins.size() > 0) {
@@ -127,7 +132,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	}
 
 	public static String externalMethodName(String owner, MethodNode method) {
-		return convertClassName(owner)+"_"+convertMethodName(method.name,method.desc);
+		return convertClassName(owner)+"_"+convertMethodName(owner,method.name,method.desc);
 	}
 	
 	static String convertType(Type type) {
@@ -153,7 +158,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
         case Type.ARRAY:
         	return T_ARRAY_+convertType(type.getElementType());
         case Type.OBJECT:
-        	return convertClassName(type.getInternalName());
+        	return T_OBJECT+"/*"+convertClassName(type.getInternalName())+"*/";
         default:
     		throw new RuntimeException("Unexpected convertType "+type);
         }
@@ -792,9 +797,8 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		invoke(owner, name, true, desc);
 	}
 
-	public static String convertMethodName(String name, String desc) {
-		// uniformly using signature on all method names is simpler
-		int descHash = desc.hashCode();
+	public static String convertMethodName(String owner, String name, String desc) {
+		int descHash = (owner+desc).hashCode();
 		String sig = (descHash >= 0) ? Integer.toString(descHash, 36)
 				 					: "M"+Integer.toString(-descHash, 36);
 		if (Character.isJavaIdentifierStart(name.charAt(0))) {
@@ -828,11 +832,13 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			String ref = stack(++d,OBJECT_PSEUDO_TYPE);
 			argList[0] = ref;
 			checkReference(ref);
+			//TODO monitorenter on ref if synchronized method
 			prefix = "(("+convertClassName(owner)+")"+ref+")->"+OBJECT_CLASS+"->"+CLASS_METHOD_TABLE+".";
 		} else {
+			//TODO monitorenter on class if synchronized method
 			prefix = convertClassName(owner)+"_";
 		}
-		call.append(prefix).append(convertMethodName(name,desc)).append("(");
+		call.append(prefix).append(convertMethodName(owner,name,desc)).append("(");
 		String sep = "";
 		for (int i = 0;  i < argList.length;  ++i) {
 			call.append(sep);  sep = ",";
@@ -1045,9 +1051,10 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		//	..., value1, value2
 		String s1 = stack(1,FRAME_ANY,1);
         String s2 = stack(2,FRAME_ANY,1);
-		emit(FRAME_SWAP+" = "+s1+";");
-		emit(s1+" = "+s2+";");
-		emit(s2+" = "+FRAME_SWAP+";");
+		emit("{"+FRAME+" "+FRAME_SWAP+" = "+s1+"; "+s1+" = "+s2+"; "+s2+" = "+FRAME_SWAP+";}");
+//		emit(FRAME_SWAP+" = "+s1+";");
+//		emit(s1+" = "+s2+";");
+//		emit(s2+" = "+FRAME_SWAP+";");
 	}
 
 	@Override
