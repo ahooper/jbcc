@@ -1,5 +1,6 @@
 package ca.nevdull.jbcc3;
 
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Formatter;
 import java.util.List;
@@ -11,6 +12,7 @@ import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.InstructionAdapter;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.analysis.Analyzer;
@@ -24,20 +26,23 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	private PrintWriter out;
 
 	private InstructionCommenter insnCommenter;
-	private StringConstants stringCons;
+	protected StringConstants stringCons;
+	private ClassCache classCache;
+
+	private String[] argIsInterface;
 	
-	public MethodCompiler(PrintWriter out) {
+	MethodCompiler(ClassCache classCache) {
 		super(Opcodes.ASM5, null);
-		this.out = out;
-		stringCons = new StringConstants(out);
-		insnCommenter = new InstructionCommenter(out);
+		this.classCache = classCache;
+		stringCons = new StringConstants();
+		insnCommenter = new InstructionCommenter();
 	}
 
-	public void setOut(PrintWriter out) {
-		this.out.flush();
+	void setOut(PrintWriter out) {
 		this.out = out;
 		insnCommenter.setOut(out);
 		stringCons.setOut(out);
+		stringCons.clear();
 	}
 	
 	void compileStrings(MethodNode method) {
@@ -59,6 +64,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
         	}
         	out.println();
         }
+        //TODO exception handling
         
         if ((method.access & Opcodes.ACC_ABSTRACT) != 0) {
         	out.println("/*ABSTRACT*/");
@@ -69,7 +75,9 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		Type returnType = Type.getReturnType(method.desc);
 
         if ((method.access & Opcodes.ACC_NATIVE) != 0) {
-			out.print("/*NATIVE*/ extern ");
+			out.println("/*NATIVE*/");
+        	return;  // all the externs are now generated in the .h so is no longer needed here
+			//out.print("/*NATIVE*/ extern ");
         } else if (   /*(method.access & Opcodes.ACC_STATIC) == 0
         		   || */(method.access & Opcodes.ACC_PRIVATE) != 0) {
 			out.print("static ");
@@ -81,13 +89,17 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 		String sep = "";
 		argsEnd = 0;
+		int virtual = ((method.access & Opcodes.ACC_STATIC) == 0) ? 1 : 0;
+		argIsInterface = new String[method.maxLocals];
 		if ((method.access & Opcodes.ACC_STATIC) == 0) {
+			checkArgIsInterface(argsEnd,classNode);
         	out.print(convertClassName(classNode.name)/*this*/);
         	out.print(" ");  sep = ", ";
         	out.print(FRAME);
         	out.print(argsEnd++);
         }
         for (int i = 0;  i < argTypes.length;  i++) {
+			checkArgIsInterface(argsEnd,argTypes[i]);
         	out.print(sep);  sep = ", ";
         	out.print(convertType(argTypes[i]));
         	out.print(" ");
@@ -100,10 +112,15 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
     		return;
         }
 		out.println(") {");
-		//out.print(T_STACK+" "+FRAME_SWAP);  sep = ", ";
+        for (int i = 0;  i < argIsInterface.length;  i++) {
+	    	if (argIsInterface[i] != null) {
+	    		out.println(argIsInterface[i]);
+	    	}
+	    }
+		
 		int m = method.maxLocals + method.maxStack;
 		if (m > argsEnd) {
-			out.print(T_STACK);  sep = " ";
+			out.print(T_ANY);  sep = " ";
 			for (int n = argsEnd;  n < m;  n++) {
 	        	out.print(sep);  sep = ", ";
 				out.print(FRAME+n);
@@ -115,6 +132,9 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		if (ins.size() > 0) {
 		    Analyzer<BasicValue> a = new Analyzer<BasicValue>(new BasicInterpreter());
 		    Frame<BasicValue>[] frames = a.analyze(classNode.name, method);
+		    //NOT NEEDED: I'm now handling interface conversion at method entry, not invoker
+		    //Analyzer<TypedValue> a = new Analyzer<TypedValue>(new TypedInterpreter());
+		    //Frame<TypedValue>[] frames = a.analyze(classNode.name, method);
 		    for (int fx = 0; fx < frames.length; ++fx) {
 		    	frame = frames[fx];
 		    	AbstractInsnNode insn = ins.get(fx);
@@ -131,8 +151,44 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
         out.println("}");
 	}
 
+	private void checkArgIsInterface(int frameLoc, Type argType) {
+		if (argType.getSort() == Type.OBJECT) {
+			String argClassName = argType.getInternalName();
+			try {
+				ClassNode argCN = classCache.get(argClassName);
+				checkArgIsInterface(frameLoc, argCN);
+			} catch (ClassNotFoundException | IOException e) {
+				System.out.println("Unable to load "+argClassName+": "+e.getMessage());
+			}
+		}
+	}
+
+	private void checkArgIsInterface(int frameLoc, ClassNode argClassNode) {
+		if ((argClassNode.access & Opcodes.ACC_INTERFACE) != 0) {
+			String convIntfcName = convertClassName(argClassNode.name);
+			argIsInterface[frameLoc] = "struct "+METHOD_STRUCT_PREFIX+convIntfcName+" *"+INTERFACE_METHODS+(frameLoc)
+								+" = jbcc_find_interface("+FRAME+(frameLoc)+",&"+CLASS_STRUCT_PREFIX+convIntfcName+");";
+		}
+	}
+
 	public static String externalMethodName(String owner, MethodNode method) {
 		return convertClassName(owner)+"_"+convertMethodName(owner,method.name,method.desc);
+	}
+
+	public static String convertMethodName(String owner, String name, String desc) {
+		int descHash = (/*owner+*/desc).hashCode();
+		String sig = (descHash >= 0) ? Integer.toString(descHash, 36)
+				 					: "M"+Integer.toString(-descHash, 36);
+		if (Character.isJavaIdentifierStart(name.charAt(0))) {
+			// normal methods
+			return escapeName(name)+"_"+sig;			
+		} else if (name.equals("<init>")) {
+			return "_init_"+sig;
+		} else if (name.equals("<clinit>")) {
+			return "_clinit_"+sig;
+		} else {
+			return escapeName(name);			
+		}
 	}
 	
 	static String convertType(Type type) {
@@ -158,16 +214,18 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
         case Type.ARRAY:
         	return T_ARRAY_+convertType(type.getElementType());
         case Type.OBJECT:
-        	return T_OBJECT+"/*"+convertClassName(type.getInternalName())+"*/";
+        	return convertClassName(type.getInternalName());
         default:
     		throw new RuntimeException("Unexpected convertType "+type);
         }
 	}
 
-	public static String convertType(String desc) {
+	static String convertType(String desc) {
 		return convertType(Type.getType(desc));
 	}
 	
+    //NOT NEEDED: I'm now handling interface conversion at method entry, not invoker
+	//Frame<TypedValue> frame;
 	Frame<BasicValue> frame;
 	int argsEnd;
 	
@@ -206,6 +264,10 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		// *width is not needed, because asm.tree.analysis.Frame does not use two stack slots
 		// for double-word values. it does reserve a dummy slot in locals
 		return FRAME+loc+variant;
+	}
+	
+	private Type stackType(int d) {
+		return frame.getStack(frame.getStackSize() - d).getType();
 	}
 	
 	private boolean stackCategory2(int d) {
@@ -295,11 +357,11 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	private void checkIndex(String ref, String ind) {
 		emit("if ("+ref+" == null) "+LIB_THROW_NULL_POINTER_EXCEPTION+"();");
-		emit("if ("+ind+" < 0 || "+ind+" >= (("+T_ARRAY_HEAD+"*)"+ref+")."+ARRAY_LENGTH+") "+LIB_THROW_ARRAY_INDEX_OUT_OF_BOUNDS_EXCEPTION+"("+ind+");");
+		emit("if ("+ind+" < 0 || "+ind+" >= (("+T_ARRAY_HEAD+"*)"+ref+")->"+ARRAY_LENGTH+") "+LIB_THROW_ARRAY_INDEX_OUT_OF_BOUNDS_EXCEPTION+"("+ind+");");
 	}
 	
 	private String arrayIndex(String ref, String ind, Type eType) {
-		return "(("+T_ARRAY_+eType.getClassName()+")"+ref+")."+ARRAY_ELEMENTS+"["+ind+"]";
+		return "(("+T_ARRAY_+convertType(eType)+")"+ref+")->"+ARRAY_ELEMENTS+"["+ind+"]";
 	}
 
 	@Override
@@ -309,11 +371,12 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void anew(Type type) {
+		// assume LIB_NEW does this: emitClassInitialize(type.getInternalName());
 		emit(stack(0,type)+" = "+LIB_NEW+"("+classPointer(type)+"."+CLASS_CLASS+");");
 	}
 
 	private String classPointer(Type type) {
-		return "&"+CLASS_STRUCT_PREFIX+convertClassName(type.getInternalName());
+		return "("+CLASS_CLASS_TYPE+"*)&"+CLASS_STRUCT_PREFIX+convertClassName(type.getInternalName());
 	}
 
 	@Override
@@ -326,7 +389,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	public void arraylength() {
 		String ref = stack(1,FRAME_ARRAY,1);
 		checkReference(ref);
-		emit(stack(0,Type.INT_TYPE)+" = "+"(("+T_ARRAY_HEAD+"*)"+ref+")."+ARRAY_LENGTH+";");
+		emit(stack(0,Type.INT_TYPE)+" = "+"(("+T_ARRAY_HEAD+"*)"+ref+")->"+ARRAY_LENGTH+";");
 	}
 
 	@Override
@@ -412,7 +475,13 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void dconst(double cst) {
-		emit(stack(0,Type.DOUBLE_TYPE)+" = "+Double.toString(cst)+";");
+		emit(stack(0,Type.DOUBLE_TYPE)+" = "+doubleLiteral(cst)+";");
+	}
+	
+	static String doubleLiteral(double v) {
+		if (Double.isNaN(v)) return "NAN";
+		else if (Double.isInfinite(v)) return (v > 0.0) ? "HUGE_VAL" : "-HUGE_VAL";
+		else return Double.toString(v);
 	}
 
 	@Override
@@ -597,7 +666,13 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void fconst(float cst) {
-		emit(stack(0,Type.FLOAT_TYPE)+" = "+Float.toString(cst)+"F;");
+		emit(stack(0,Type.FLOAT_TYPE)+" = "+floatLiteral(cst)+";");
+	}
+	
+	static String floatLiteral(float v) {
+		if (Float.isNaN(v)) return "NAN";
+		else if (Float.isInfinite(v)) return (v > 0.0) ? "HUGE_VALF" : "-HUGE_VALF";
+		else return Float.toString(v)+"F";
 	}
 
 	@Override
@@ -617,11 +692,42 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void getstatic(String owner, String name, String desc) {
+		owner = resolveStaticField(owner, name, desc);
+		emitClassInitialize(owner);
 		emit(stack(0,Type.getType(desc))+" = "+staticFieldName(owner,name)+";");
+	}
+
+	private String resolveStaticField(String owner, String name, String desc) {
+		ClassNode cn;
+		try {
+			cn = classCache.get(owner);
+		} catch (ClassNotFoundException | IOException e) {
+			System.err.println("resolveStaticField could not load class "+owner+": "+e.getMessage());
+			return null;
+		}
+		for (int fx = 0; fx < cn.fields.size(); ++fx) {
+			FieldNode field = cn.fields.get(fx);
+			if (field.name.equals(name)
+				&& (field.access & Opcodes.ACC_STATIC) != 0) {
+				assert field.desc.equals(desc);
+				return owner;
+			}
+		}
+		for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
+            String intfc = cn.interfaces.get(ix);
+            String r = resolveStaticField(intfc,name,desc);
+            if (r != null) return r;
+		}
+		if (cn.superName != null) return resolveStaticField(cn.superName,name,desc);
+		return null;
 	}
 
 	private String staticFieldName(String owner, String name) {
 		return CLASS_STRUCT_PREFIX+convertClassName(owner)+"."+CLASS_STATIC_FIELDS+"."+escapeName(name);
+	}
+
+	private void emitClassInitialize(String owner) {
+		emit("if (!"+CLASS_STRUCT_PREFIX+convertClassName(owner)+"."+CLASS_CLASS+"."+CLASS_INITIALIZED+") "+LIB_INIT_CLASS+"(("+CLASS_CLASS_TYPE+"*)&"+CLASS_STRUCT_PREFIX+convertClassName(owner)+");");
 	}
 
 	public static String convertClassName(String owner) {
@@ -668,7 +774,12 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void iconst(int cst) {
-		emit(stack(0,Type.INT_TYPE)+" = "+Integer.toString(cst)+";");
+		emit(stack(0,Type.INT_TYPE)+" = "+intLiteral(cst)+";");
+	}
+	
+	static String intLiteral(int v) {
+		if (v == Integer.MIN_VALUE) return "INT32_MIN";
+		else return Integer.toString(v);
 	}
 
 	@Override
@@ -774,50 +885,36 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void invokeinterface(String owner, String name, String desc) {
-		invoke(owner, name, true, desc);
-		//TODO not yet looking for interfaces
+		invoke(owner, name, InvokeKind.INTERFACE, desc);
 	}
 
 	@Override
 	public void invokespecial(String owner, String name, String desc, boolean itf) {
 		//TODO interface
-		invoke(owner, name, true, desc);
+		invoke(owner, name, InvokeKind.VIRTUAL, desc);
 		//TODO this has not yet captured the distinction from INVOKEVIRTUAL https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-6.html#jvms-6.5.invokespecial
 	}
 
 	@Override
 	public void invokestatic(String owner, String name, String desc, boolean itf) {
 		//TODO interface
-		invoke(owner, name, false, desc);
+		emitClassInitialize(owner);
+		invoke(owner, name, InvokeKind.STATIC, desc);
 	}
 
 	@Override
 	public void invokevirtual(String owner, String name, String desc, boolean itf) {
 		//TODO interface
-		invoke(owner, name, true, desc);
+		invoke(owner, name, InvokeKind.VIRTUAL, desc);
 	}
+	
+	enum InvokeKind { STATIC, VIRTUAL, INTERFACE };
 
-	public static String convertMethodName(String owner, String name, String desc) {
-		int descHash = (owner+desc).hashCode();
-		String sig = (descHash >= 0) ? Integer.toString(descHash, 36)
-				 					: "M"+Integer.toString(-descHash, 36);
-		if (Character.isJavaIdentifierStart(name.charAt(0))) {
-			// normal methods
-			return escapeName(name)+"_"+sig;			
-		} else if (name.equals("<init>")) {
-			return "_init_"+sig;
-		} else if (name.equals("<clinit>")) {
-			return "_clinit_"+sig;
-		} else {
-			return escapeName(name);			
-		}
-	}
-
-	private void invoke(String owner, String name, boolean virtual, String desc) {
+	private void invoke(String owner, String name, InvokeKind kind, String desc) {
 		Type retType = Type.getReturnType(desc);
 		Type[] argTypes = Type.getArgumentTypes(desc);
 		int numArgs = argTypes.length;
-		int reserve = virtual ? 1 : 0;
+		int reserve = (kind == InvokeKind.STATIC) ? 0 : 1;
 		String[] argList = new String[reserve+numArgs];
 		int d = 0;
 		for (int i = numArgs-1;  i >= 0;  --i) {
@@ -825,18 +922,45 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			argList[reserve+i] = stack(++d,argType);
 			// arguments being passed are on stack, and asm.tree.analysis.Frame does not
 			// reserve a second slot there for category 2 values
+			
+		    //NOT NEEDED: I'm now handling interface conversion at method entry, not invoker
+			//if (argType.getSort() == Type.OBJECT) {
+			//	String argClassName = argType.getInternalName();
+			//	try {
+			//		ClassNode argCN = classCache.get(argClassName);
+			//		if ((argCN.access & Opcodes.ACC_INTERFACE) != 0) {
+			//			out.println("    // interface argument "+argClassName);
+			//		}
+			//	} catch (ClassNotFoundException | IOException e) {
+			//		System.out.println("Unable to load "+argClassName+": "+e.getMessage());
+			//	}
+			//}
 		}
 		StringBuilder call = new StringBuilder();
-		String prefix;
-		if (virtual) {
-			String ref = stack(++d,OBJECT_PSEUDO_TYPE);
+		String prefix=null, ref;
+		switch (kind) {
+		case STATIC:
+			//TODO monitorenter on class if synchronized method
+			prefix = convertClassName(owner)+"_";
+			break;
+		case VIRTUAL:
+			ref = stack(++d,OBJECT_PSEUDO_TYPE);
 			argList[0] = ref;
 			checkReference(ref);
 			//TODO monitorenter on ref if synchronized method
 			prefix = "(("+convertClassName(owner)+")"+ref+")->"+OBJECT_CLASS+"->"+CLASS_METHOD_TABLE+".";
-		} else {
-			//TODO monitorenter on class if synchronized method
-			prefix = convertClassName(owner)+"_";
+			break;
+		case INTERFACE:
+			ref = stack(++d,OBJECT_PSEUDO_TYPE); //TODO INTERFACE_PSEUDO_TYPE
+			//Type refType = stackType(d);
+			//assert refType.getSort() == Type.OBJECT;
+			//String refClass = refType.getInternalName();
+			//if (!refClass.equals(owner)) out.println("    // interface reference class "+refClass+" owner "+owner);
+			argList[0] = ref;
+			checkReference(ref);
+			//TODO monitorenter on ref if synchronized method
+			prefix = "(("+convertClassName(owner)+")"+ref+")->"+OBJECT_CLASS+"->"+CLASS_METHOD_TABLE+".";
+			break;
 		}
 		call.append(prefix).append(convertMethodName(owner,name,desc)).append("(");
 		String sep = "";
@@ -856,6 +980,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	@Override
 	public void jsr(Label target) {
 		unimplemented("jsr "+makeLabel(target));
+		// recompile with -target 1.7 or later
 	}
 
 	@Override
@@ -867,7 +992,12 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void lconst(long cst) {
-		emit(stack(0,Type.LONG_TYPE)+" = "+Long.toString(cst)+";");
+		emit(stack(0,Type.LONG_TYPE)+" = "+longLiteral(cst)+";");
+	}
+	
+	static String longLiteral(long v) {
+		if (v == Long.MIN_VALUE) return "INT64_MIN";
+		else return Long.toString(v);
 	}
 
 	@Override
@@ -992,6 +1122,8 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void putstatic(String owner, String name, String desc) {
+		owner = resolveStaticField(owner, name, desc);
+		emitClassInitialize(owner);
 		emit(staticFieldName(owner,name)+" = "+stack(1,Type.getType(desc))+";");
 	}
 

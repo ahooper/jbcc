@@ -11,13 +11,11 @@ public class InstructionCommenter extends MethodVisitor {
 
 	private PrintWriter out;
 
-	public InstructionCommenter(PrintWriter out) {
+	public InstructionCommenter() {
     	super(Opcodes.ASM5);
-		this.out = out;
 	}
 
 	public void setOut(PrintWriter out) {
-		this.out.flush();
 		this.out = out;
 	}
 
@@ -90,11 +88,9 @@ public class InstructionCommenter extends MethodVisitor {
 		if (cst instanceof String) {
 			String str = (String)cst;
 			int nl = str.indexOf('\n');
-			if (nl < 0) out.println(str);
-			else {
-				out.print(str.substring(0,nl));
-				out.println("\\n");
-			}
+			if (nl >= 0) str = str.substring(0,nl)+"\\n";
+			while (str.endsWith("\\")) str = str.substring(0,str.length()-1);
+			out.println(str);
 		} else {
 			out.println(cst);
 		}

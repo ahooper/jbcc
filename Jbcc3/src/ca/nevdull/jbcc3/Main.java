@@ -2,7 +2,7 @@ package ca.nevdull.jbcc3;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.PrintWriter;
+import java.io.PrintStream;
 import java.util.Arrays;
 import java.util.ListIterator;
 import java.util.zip.ZipException;
@@ -28,9 +28,9 @@ public class Main {
 			} else if (arg.equals("-o")) {
 				String fileName = argIter.next();
 				try {
-					classCompiler.setOut(new PrintWriter(fileName));
+					System.setOut(new PrintStream(fileName));
 				} catch (FileNotFoundException e) {
-					System.err.println(fileName+":"+e.getMessage());
+					System.err.println(arg+" "+fileName+":"+e.getMessage());
 				}
 			} else if (arg.equals("-r")) {
 				opt_referenced = true;

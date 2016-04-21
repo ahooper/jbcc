@@ -32,7 +32,7 @@ public class ClassReferences extends MethodVisitor implements Iterable<String> {
 	public void visitMethodInsn(int opcode, String owner, String name, String desc, boolean itf) {
 		if (owner.charAt(0) == '[') {
 			// TODO special case for array clone
-			System.err.println("invoke "+owner+" "+name+" "+desc);
+			System.out.println("    invoke "+owner+" "+name+" "+desc);
 			Type elemType = Type.getType(owner).getElementType();
 			if (elemType.getSort() == Type.OBJECT) classReference(elemType.getInternalName());
 			return;
