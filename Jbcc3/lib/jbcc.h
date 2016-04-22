@@ -29,6 +29,8 @@ typedef struct o_java_lang_Class *java_lang_Class;
 typedef struct o_java_lang_Object *java_lang_Object;
 typedef struct o_java_lang_String *java_lang_String;
 typedef struct o_java_lang_Throwable *java_lang_Throwable;
+typedef struct o_Array *Array;
+typedef struct a_java_lang_Object *Array_java_lang_Object;
 
 typedef void*	Object;
 
@@ -52,7 +54,10 @@ typedef union {
     Int I;
     Long L;
     void* A;
-    Object O;
+    struct {
+    	Object O;
+    	void* M;  // interface method list
+    } R;
 } Any;
 
 typedef void*		LabelPtr;
@@ -112,6 +117,68 @@ typedef struct {
 	Array_Head H;
 	Reference	E[];
 } *Array_Reference;
+
+struct m_Array {
+    Void (*_init_uph)(java_lang_Object);
+    Boolean (*equals_pw62vp)(java_lang_Object,java_lang_Object);
+    Int (*hashCode_up4)(java_lang_Object);
+    java_lang_String (*toString_w4s62z)(java_lang_Object);
+    Void (*finalize_uph)(java_lang_Object);
+    java_lang_Object (*clone_Mz83ag3)(java_lang_Object);
+    java_lang_Class (*getClass_M234hr2)(java_lang_Object);
+    Void (*notify_uph)(java_lang_Object);
+    Void (*notifyAll_uph)(java_lang_Object);
+    Void (*wait_uph)(java_lang_Object);
+    Void (*wait_r3e7)(java_lang_Object,Long);
+    Void (*wait_ncjxw)(java_lang_Object,Long,Int);
+    Array_java_lang_Object (*clone_Mw846ei)(Array);
+};
+extern Void Array__init_uph(Array);
+extern Array_java_lang_Object Array_clone_Mw846ei(Array);
+extern java_lang_Object Array_clone_Mz83ag3(Array);
+
+#define ARRAY_METHODS =													\
+        /*override-incompatible pointer types*/&Array__init_uph,		\
+        &java_lang_Object_equals_pw62vp,								\
+        &java_lang_Object_hashCode_up4,									\
+        &java_lang_Object_toString_w4s62z,								\
+        &java_lang_Object_finalize_uph,									\
+        /*override-incompatible pointer types*/&Array_clone_Mz83ag3,	\
+        &java_lang_Object_getClass_M234hr2,								\
+        &java_lang_Object_notify_uph,									\
+        &java_lang_Object_notifyAll_uph,								\
+        &java_lang_Object_wait_uph,										\
+        &java_lang_Object_wait_r3e7,									\
+        &java_lang_Object_wait_ncjxw,									\
+        &Array_clone_Mw846ei,
+extern struct Interface_List_Entry i_Array[];
+
+extern struct Class Class_Boolean;
+extern struct Class Class_Byte;
+extern struct Class Class_Char;
+extern struct Class Class_Double;
+extern struct Class Class_Float;
+extern struct Class Class_Int;
+extern struct Class Class_Long;
+extern struct Class Class_Short;
+
+extern struct Class Class_Array_Boolean;
+extern struct Class Class_Array_Byte;
+extern struct Class Class_Array_Char;
+extern struct Class Class_Array_Double;
+extern struct Class Class_Array_Float;
+extern struct Class Class_Array_Int;
+extern struct Class Class_Array_Long;
+extern struct Class Class_Array_Short;
+
+extern struct Class Class_Array_Array_Boolean;
+extern struct Class Class_Array_Array_Byte;
+extern struct Class Class_Array_Array_Char;
+extern struct Class Class_Array_Array_Double;
+extern struct Class Class_Array_Array_Float;
+extern struct Class Class_Array_Array_Int;
+extern struct Class Class_Array_Array_Long;
+extern struct Class Class_Array_Array_Short;
 
 extern Int jbcc_d2i(Double op);
 extern Long jbcc_d2l(Double op);

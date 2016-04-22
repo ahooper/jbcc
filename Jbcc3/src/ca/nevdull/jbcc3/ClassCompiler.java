@@ -108,12 +108,12 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
     			referenceType(argType);
     		}
 			referenceType(Type.getReturnType(method.desc));
-            if (   /*(method.access & Opcodes.ACC_STATIC) != 0
-            	&& */(method.access & Opcodes.ACC_PRIVATE) == 0) {
-            	// inheriting classes need the declarations
-            	// these could conceivably go in a separate include file only children would use
-            	declareMethod(cn.name, method);
-            }
+            //if (   /*(method.access & Opcodes.ACC_STATIC) != 0
+            //	&& */(method.access & Opcodes.ACC_PRIVATE) == 0) {
+        	// inheriting classes need all the method declarations to complete their
+			// tables, even PRIVATE methods
+        	// these could conceivably go in a separate include file only children would use
+        	declareMethod(cn.name, method);
         }
 		
 		/*
@@ -136,7 +136,7 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
         
         // class structure
         out.println("extern struct "+CLASS_STRUCT_PREFIX+convClassName+" {");
-        out.println("    "+CLASS_CLASS_TYPE+" "+CLASS_CLASS+";");
+        out.println("    "+OBJECT_CLASS_TYPE+" "+CLASS_CLASS+";");
         out.println("    struct "+METHOD_STRUCT_PREFIX+convClassName+" "+CLASS_METHOD_TABLE+";");
         out.println("    struct {");
 		for (int fx = 0; fx < cn.fields.size(); ++fx) {
@@ -148,6 +148,11 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
         }
         out.println("    } "+CLASS_STATIC_FIELDS+";");
         out.println("} "+CLASS_STRUCT_PREFIX+convClassName+";");
+        
+		out.println("extern struct "+CLASS_STRUCT_PREFIX+T_ARRAY_+convClassName+" {");
+        out.println("    "+OBJECT_CLASS_TYPE+" "+CLASS_CLASS+";");
+        out.println("    "+ARRAY_METHODS_TYPE+" "+CLASS_METHOD_TABLE+";");
+		out.println("} "+CLASS_STRUCT_PREFIX+T_ARRAY_+convClassName+";");
         
         // instance field declarations
         out.println("struct "+OBJECT_STRUCT_PREFIX+convClassName+" {");
@@ -257,7 +262,7 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		out.println("    ."+CLASS_CLASS+" = { /*struct Class*/");
 		out.println("        ."+CLASS_OBJ_SIZE+" = sizeof(struct "+OBJECT_STRUCT_PREFIX+convClassName+"),");
 		out.println("        ."+CLASS_INTERFACES+" = "+CLASS_INTERFACES_PREFIX+convClassName+",");
-		out.println("        ."+CLASS_NAME+" = \""+cn.name+"\",");
+		out.println("        ."+CLASS_NAME+" = \""+cn.name.replace('/','.')+"\",");
 		for (int mx = 0; mx < cn.methods.size(); ++mx) {
             MethodNode method = cn.methods.get(mx);
             if (method.name.equals("<clinit>") 
@@ -292,6 +297,17 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		out.println("    }");
 		out.println("};");
 		
+		out.println("struct "+CLASS_STRUCT_PREFIX+T_ARRAY_+convClassName+" "+CLASS_STRUCT_PREFIX+T_ARRAY_+convClassName+" = {");
+		out.println("    ."+CLASS_CLASS+" = { /*struct Class*/");
+		out.println("        ."+CLASS_OBJ_SIZE+" = sizeof(struct "+ARRAY_STRUCT_PREFIX+convClassName+"),");
+		out.println("        ."+CLASS_INTERFACES+" = "+ARRAY_INTERFACES+",");
+		out.println("        ."+CLASS_NAME+" = \""+cn.name.replace('/','.')+"[]\",");
+		out.println("        ."+CLASS_INITIALIZED+" = 1 },");  // no <clinit> for arrays
+		out.println("    ."+CLASS_METHOD_TABLE+" = { /*struct "+METHOD_STRUCT_PREFIX+convClassName+"*/");
+		out.println("        "+ARRAY_METHODS);
+		out.println("    },");
+		out.println("};");
+		
 		out.close();  out = null;
 		 
 		// Add referenced classes to list for compilation
@@ -303,26 +319,35 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 	}
 	
 	private void putStaticStringValue(String string) {
-		out.println("struct Char_array "+staticStringID(string)+" = {");
-		out.println("    {");  // Array_Head
-		out.println("        0,");  // Array_Head.C  TODO
-		out.println("        "+string.length()+"},");  // Array_Head.L
-		out.print("    ");  // Char_array.E
-		methodCompiler.stringCons.putStringCharArray(string, ";");  // modularization boundary hack!
+		String stringID = staticStringID(string);
+		
+		out.println("struct Char_array "+stringID+"_value = {");
+		out.println("    .H = {");  // Array_Head
+		out.println("        .C = 0/*TODO*/,");  // Array_Head.C  TODO
+		out.println("        .L = "+string.length()+"},");  // Array_Head.L
+		out.print("    .E = ");  // Char_array.E
+		methodCompiler.stringCons.putStringCharArray(string, "};");  // modularization boundary hack!
+		
+		out.println("struct o_java_lang_String "+stringID+" = {");
+		//NOTE this must match the layout in classpath java/lang/String.h
+		out.println("                ._C_ = &c_java_lang_String,");
+		out.println("                .monitor = null,");
+		out.println("                .value = &"+stringID+"_value,");
+		out.println("                .count = "+string.length()+",");
+		out.println("                .cachedHashCode = 0,");
+		out.println("                .offset = 0};");
+	    // OpenJDK version:
+		//out.print("                .hash = "+string.hashCode()+"}");
+		//			// this relies on the target java.lang.String having the same
+		//			// hash calculation as this one does
 	}
 
 	private String staticStringID(String string) {
-		return "SCA"+Integer.toString(System.identityHashCode(string),36);
+		return "SC"+Integer.toString(System.identityHashCode(string),36);
 	}
 
 	private void putStaticString(String string) {
-		out.println("/*struct o_java_lang_String*/ {");
-		out.println("                ._C_ = &c_java_lang_String,");
-		out.println("                .monitor = 0,");
-		out.println("                .value = &"+staticStringID(string)+",");
-		out.print("                .hash = "+string.hashCode()+"}");
-					// this relies on the target java.lang.String having the same
-					// hash calculation as this one does
+		out.print("&"+staticStringID(string));
 	}
 
 	private LinkedHashMap<String,String> inheritedMethodTable(ClassNode cn, boolean silent) throws FileNotFoundException, ClassNotFoundException, IOException {
@@ -391,7 +416,7 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 	            		if (convClassName == null) convClassName = MethodCompiler.convertClassName(cn.name);
 	                	name = "hidden_"+convClassName+"_"+name;
 	                }
-	        		String decl = MethodCompiler.convertType(field.desc)+" "+name+";";
+	        		String decl = MethodCompiler.convertTypeDesc(field.desc)+" "+name+";";
 		        	table.put(name, decl);
 	        	}
 	        }
@@ -456,7 +481,7 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 	}
 
 	private void declareField(FieldNode field) {
-		out.println(MethodCompiler.convertType(field.desc)+" "+MethodCompiler.escapeName(field.name)+";");
+		out.println(MethodCompiler.convertTypeDesc(field.desc)+" "+MethodCompiler.escapeName(field.name)+";");
 	}
 
 /*

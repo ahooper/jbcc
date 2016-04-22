@@ -30,6 +30,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	private ClassCache classCache;
 
 	private String[] argIsInterface;
+	private boolean methodIsSynchronized;
 	
 	MethodCompiler(ClassCache classCache) {
 		super(Opcodes.ASM5, null);
@@ -78,9 +79,11 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			out.println("/*NATIVE*/");
         	return;  // all the externs are now generated in the .h so is no longer needed here
 			//out.print("/*NATIVE*/ extern ");
-        } else if (   /*(method.access & Opcodes.ACC_STATIC) == 0
-        		   || */(method.access & Opcodes.ACC_PRIVATE) != 0) {
-			out.print("static ");
+        //} else if (   /*(method.access & Opcodes.ACC_STATIC) == 0
+        //		   || */(method.access & Opcodes.ACC_PRIVATE) != 0) {
+		//	out.print("static ");
+        	// inheriting classes need all the method declarations to complete their
+			// tables, even PRIVATE methods
 		}
         out.print(convertType(returnType));
 		out.print(" ");
@@ -128,11 +131,16 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			out.println(";");
 		}
 		
+		methodIsSynchronized = (method.access & Opcodes.ACC_SYNCHRONIZED) != 0;
+		if (methodIsSynchronized) {
+			// TODO monitorenter
+		}
+		
 		InsnList ins = method.instructions;
 		if (ins.size() > 0) {
 		    Analyzer<BasicValue> a = new Analyzer<BasicValue>(new BasicInterpreter());
 		    Frame<BasicValue>[] frames = a.analyze(classNode.name, method);
-		    //NOT NEEDED: I'm now handling interface conversion at method entry, not invoker
+		    //OBSOLETE: I'm now handling interface conversion at method entry, not invoker
 		    //Analyzer<TypedValue> a = new Analyzer<TypedValue>(new TypedInterpreter());
 		    //Frame<TypedValue>[] frames = a.analyze(classNode.name, method);
 		    for (int fx = 0; fx < frames.length; ++fx) {
@@ -220,11 +228,11 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
         }
 	}
 
-	static String convertType(String desc) {
+	static String convertTypeDesc(String desc) {
 		return convertType(Type.getType(desc));
 	}
 	
-    //NOT NEEDED: I'm now handling interface conversion at method entry, not invoker
+    //OBSOLETE: I'm now handling interface conversion at method entry, not invoker
 	//Frame<TypedValue> frame;
 	Frame<BasicValue> frame;
 	int argsEnd;
@@ -254,7 +262,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
             break;
         // case Type.OBJECT:
         default:
-            variant = FRAME_OBJECT;
+            variant = FRAME_REFER_OBJECT;
         }
 		return stack(d, variant, width);		
 	}
@@ -302,7 +310,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
             break;
         // case Type.OBJECT:
         default:
-            variant = FRAME_OBJECT;
+            variant = FRAME_REFER_OBJECT;
         }
 		return FRAME+n+variant;		
 	}
@@ -351,17 +359,17 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	public void aload(Type type) {
 		String ref = stack(2,FRAME_ARRAY,1);
 		String ind = stack(1,Type.INT_TYPE);
-		checkIndex(ref, ind);
+		emitIndexCheck(ref, ind);
 		emit(stack(2,type)+" = "+arrayIndex(ref,ind,type)+";");
 	}
 
-	private void checkIndex(String ref, String ind) {
+	private void emitIndexCheck(String ref, String ind) {
 		emit("if ("+ref+" == null) "+LIB_THROW_NULL_POINTER_EXCEPTION+"();");
 		emit("if ("+ind+" < 0 || "+ind+" >= (("+T_ARRAY_HEAD+"*)"+ref+")->"+ARRAY_LENGTH+") "+LIB_THROW_ARRAY_INDEX_OUT_OF_BOUNDS_EXCEPTION+"("+ind+");");
 	}
 	
-	private String arrayIndex(String ref, String ind, Type eType) {
-		return "(("+T_ARRAY_+convertType(eType)+")"+ref+")->"+ARRAY_ELEMENTS+"["+ind+"]";
+	private String arrayIndex(String ref, String ind, Type elemType) {
+		return "(("+T_ARRAY_+convertType(elemType)+")"+ref+")->"+ARRAY_ELEMENTS+"["+ind+"]";
 	}
 
 	@Override
@@ -376,11 +384,14 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	}
 
 	private String classPointer(Type type) {
-		return "("+CLASS_CLASS_TYPE+"*)&"+CLASS_STRUCT_PREFIX+convertClassName(type.getInternalName());
+		return "("+OBJECT_CLASS_TYPE+"*)&"+CLASS_STRUCT_PREFIX+convertType(type);
 	}
 
 	@Override
 	public void areturn(Type type) {
+		if (methodIsSynchronized) {
+			// TODO monitorexit
+		}
 		if (type == Type.VOID_TYPE) emit("return;");
 		else emit("return "+stack(1,type)+";");
 	}
@@ -388,21 +399,23 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	@Override
 	public void arraylength() {
 		String ref = stack(1,FRAME_ARRAY,1);
-		checkReference(ref);
-		emit(stack(0,Type.INT_TYPE)+" = "+"(("+T_ARRAY_HEAD+"*)"+ref+")->"+ARRAY_LENGTH+";");
+		emitReferenceCheck(ref);
+		emit(stack(1,Type.INT_TYPE)+" = "+"(("+T_ARRAY_HEAD+"*)"+ref+")->"+ARRAY_LENGTH+";");
 	}
 
 	@Override
 	public void astore(Type type) {
 		String ref = stack(3,FRAME_ARRAY,1);
 		String ind = stack(2,Type.INT_TYPE);
-		checkIndex(ref, ind);
+		emitIndexCheck(ref, ind);
 		emit(arrayIndex(ref,ind,type)+" = "+stack(1,type)+";");
 	}
-	
 
 	@Override
 	public void athrow() {
+		if (methodIsSynchronized) {
+			// TODO monitorexit?
+		}
 		emit(LIB_THROW+"("+stack(1,OBJECT_PSEUDO_TYPE)+");");
 	}
 
@@ -678,7 +691,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	@Override
 	public void getfield(String owner, String name, String desc) {
 		String ref = stack(1,OBJECT_PSEUDO_TYPE);
-		checkReference(ref);
+		emitReferenceCheck(ref);
 		emit(stack(1,Type.getType(desc))+" = "+objectField(ref,owner,name)+";");
 	}
 	
@@ -686,7 +699,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		return "(("+convertClassName(owner)+")"+ref+")->"+name;
 	}
 
-	private void checkReference(String ref) {
+	private void emitReferenceCheck(String ref) {
 		emit("if ("+ref+" == null) "+LIB_THROW_NULL_POINTER_EXCEPTION+"();");
 	}
 
@@ -727,7 +740,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	}
 
 	private void emitClassInitialize(String owner) {
-		emit("if (!"+CLASS_STRUCT_PREFIX+convertClassName(owner)+"."+CLASS_CLASS+"."+CLASS_INITIALIZED+") "+LIB_INIT_CLASS+"(("+CLASS_CLASS_TYPE+"*)&"+CLASS_STRUCT_PREFIX+convertClassName(owner)+");");
+		emit("if (!"+CLASS_STRUCT_PREFIX+convertClassName(owner)+"."+CLASS_CLASS+"."+CLASS_INITIALIZED+") "+LIB_INIT_CLASS+"(("+OBJECT_CLASS_TYPE+"*)&"+CLASS_STRUCT_PREFIX+convertClassName(owner)+");");
 	}
 
 	public static String convertClassName(String owner) {
@@ -922,19 +935,6 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			argList[reserve+i] = stack(++d,argType);
 			// arguments being passed are on stack, and asm.tree.analysis.Frame does not
 			// reserve a second slot there for category 2 values
-			
-		    //NOT NEEDED: I'm now handling interface conversion at method entry, not invoker
-			//if (argType.getSort() == Type.OBJECT) {
-			//	String argClassName = argType.getInternalName();
-			//	try {
-			//		ClassNode argCN = classCache.get(argClassName);
-			//		if ((argCN.access & Opcodes.ACC_INTERFACE) != 0) {
-			//			out.println("    // interface argument "+argClassName);
-			//		}
-			//	} catch (ClassNotFoundException | IOException e) {
-			//		System.out.println("Unable to load "+argClassName+": "+e.getMessage());
-			//	}
-			//}
 		}
 		StringBuilder call = new StringBuilder();
 		String prefix=null, ref;
@@ -946,20 +946,16 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		case VIRTUAL:
 			ref = stack(++d,OBJECT_PSEUDO_TYPE);
 			argList[0] = ref;
-			checkReference(ref);
+			emitReferenceCheck(ref);
 			//TODO monitorenter on ref if synchronized method
 			prefix = "(("+convertClassName(owner)+")"+ref+")->"+OBJECT_CLASS+"->"+CLASS_METHOD_TABLE+".";
 			break;
 		case INTERFACE:
 			ref = stack(++d,OBJECT_PSEUDO_TYPE); //TODO INTERFACE_PSEUDO_TYPE
-			//Type refType = stackType(d);
-			//assert refType.getSort() == Type.OBJECT;
-			//String refClass = refType.getInternalName();
-			//if (!refClass.equals(owner)) out.println("    // interface reference class "+refClass+" owner "+owner);
 			argList[0] = ref;
-			checkReference(ref);
+			emitReferenceCheck(ref);
 			//TODO monitorenter on ref if synchronized method
-			prefix = "(("+convertClassName(owner)+")"+ref+")->"+OBJECT_CLASS+"->"+CLASS_METHOD_TABLE+".";
+			prefix = "((struct "+METHOD_STRUCT_PREFIX+convertClassName(owner)+"*)"+stack(d,FRAME_ANY,1)+FRAME_REFER_METHODS+")->";
 			break;
 		}
 		call.append(prefix).append(convertMethodName(owner,name,desc)).append("(");
@@ -1002,7 +998,10 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void load(int lclIndex, Type type) {
-		emit(stack(0,type)+" = "+local(lclIndex,type)+";");
+		if (lclIndex < argIsInterface.length && argIsInterface[lclIndex] != null) {
+			emit(stack(0,type)+" = "+local(lclIndex,type)+";  // interface");
+			emit(stack(0,FRAME_ANY,1)+FRAME_REFER_METHODS+" = "+INTERFACE_METHODS+(lclIndex)+";");
+		} else emit(stack(0,type)+" = "+local(lclIndex,type)+";");
 	}
 
 	static int switchCount = 0;
@@ -1116,7 +1115,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	@Override
 	public void putfield(String owner, String name, String desc) {
 		String ref = stack(2,OBJECT_PSEUDO_TYPE);
-		checkReference(ref);
+		emitReferenceCheck(ref);
 		emit(objectField(ref,owner,name)+" = "+stack(1,Type.getType(desc))+";");
 	}
 
