@@ -335,7 +335,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void aconst(Object cst) {
-		if (cst == null) emit(stack(0,OBJECT_PSEUDO_TYPE)+" = null;");
+		if (cst == null) emit(stack(0,OBJECT_PSEUDO_TYPE)+" = "+NULL_REFERENCE+";");
 		else {
 	        String scn = stringCons.get((String)cst);
 			emit(stack(0,OBJECT_PSEUDO_TYPE)+" = "+scn+"."+STRING_CONSTANT_STRING+" ? "+scn+"."+STRING_CONSTANT_STRING+" : "+LIB_INIT_STRING_CONST+"(&"+scn+");");
@@ -364,8 +364,8 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	}
 
 	private void emitIndexCheck(String ref, String ind) {
-		emit("if ("+ref+" == null) "+LIB_THROW_NULL_POINTER_EXCEPTION+"();");
-		emit("if ("+ind+" < 0 || "+ind+" >= (("+T_ARRAY_HEAD+"*)"+ref+")->"+ARRAY_LENGTH+") "+LIB_THROW_ARRAY_INDEX_OUT_OF_BOUNDS_EXCEPTION+"("+ind+");");
+		emit("if ("+ref+" == "+NULL_REFERENCE+") "+LIB_THROW_NULL_POINTER_EXCEPTION+"();");
+		emit("if ("+ind+" < 0 || "+ind+" >= (("+T_ARRAY_COMMON+"*)"+ref+")->"+ARRAY_LENGTH+") "+LIB_THROW_ARRAY_INDEX_OUT_OF_BOUNDS_EXCEPTION+"("+ind+");");
 	}
 	
 	private String arrayIndex(String ref, String ind, Type elemType) {
@@ -400,7 +400,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	public void arraylength() {
 		String ref = stack(1,FRAME_ARRAY,1);
 		emitReferenceCheck(ref);
-		emit(stack(1,Type.INT_TYPE)+" = "+"(("+T_ARRAY_HEAD+"*)"+ref+")->"+ARRAY_LENGTH+";");
+		emit(stack(1,Type.INT_TYPE)+" = "+"(("+T_ARRAY_COMMON+"*)"+ref+")->"+ARRAY_LENGTH+";");
 	}
 
 	@Override
@@ -696,11 +696,11 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	}
 	
 	private String objectField(String ref, String owner, String name) {
-		return "(("+convertClassName(owner)+")"+ref+")->"+name;
+		return "(("+convertClassName(owner)+")"+ref+")->"+escapeName(name);
 	}
 
 	private void emitReferenceCheck(String ref) {
-		emit("if ("+ref+" == null) "+LIB_THROW_NULL_POINTER_EXCEPTION+"();");
+		emit("if ("+ref+" == "+NULL_REFERENCE+") "+LIB_THROW_NULL_POINTER_EXCEPTION+"();");
 	}
 
 	@Override
@@ -744,7 +744,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	}
 
 	public static String convertClassName(String owner) {
-		return escapeName(owner);  // was owner.replace('/','_');
+		return escapeName(owner);
 	}
 
 	public static String escapeName(String name) {
@@ -871,12 +871,12 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void ifnonnull(Label target) {
-		branch(stack(1,OBJECT_PSEUDO_TYPE),"!=","null",target);
+		branch(stack(1,OBJECT_PSEUDO_TYPE),"!=",NULL_REFERENCE,target);
 	}
 
 	@Override
 	public void ifnull(Label target) {
-		branch(stack(1,OBJECT_PSEUDO_TYPE),"==","null",target);
+		branch(stack(1,OBJECT_PSEUDO_TYPE),"==",NULL_REFERENCE,target);
 	}
 
 	@Override
@@ -903,21 +903,21 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void invokespecial(String owner, String name, String desc, boolean itf) {
-		//TODO interface
+		assert !itf;
 		invoke(owner, name, InvokeKind.VIRTUAL, desc);
 		//TODO this has not yet captured the distinction from INVOKEVIRTUAL https://docs.oracle.com/javase/specs/jvms/se8/html/jvms-6.html#jvms-6.5.invokespecial
 	}
 
 	@Override
 	public void invokestatic(String owner, String name, String desc, boolean itf) {
-		//TODO interface
+		assert !itf;
 		emitClassInitialize(owner);
 		invoke(owner, name, InvokeKind.STATIC, desc);
 	}
 
 	@Override
 	public void invokevirtual(String owner, String name, String desc, boolean itf) {
-		//TODO interface
+		assert !itf;
 		invoke(owner, name, InvokeKind.VIRTUAL, desc);
 	}
 	
@@ -937,25 +937,30 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			// reserve a second slot there for category 2 values
 		}
 		StringBuilder call = new StringBuilder();
-		String prefix=null, ref;
+		String prefix=null, ref, ownerType;
+		if (owner.charAt(0) == '[') {
+			ownerType = convertType(Type.getType(owner));
+		} else {
+			ownerType = convertClassName(owner);
+		}
 		switch (kind) {
 		case STATIC:
 			//TODO monitorenter on class if synchronized method
-			prefix = convertClassName(owner)+"_";
+			prefix = ownerType+"_";
 			break;
 		case VIRTUAL:
 			ref = stack(++d,OBJECT_PSEUDO_TYPE);
 			argList[0] = ref;
 			emitReferenceCheck(ref);
 			//TODO monitorenter on ref if synchronized method
-			prefix = "(("+convertClassName(owner)+")"+ref+")->"+OBJECT_CLASS+"->"+CLASS_METHOD_TABLE+".";
+			prefix = "(("+ownerType+")"+ref+")->"+OBJECT_CLASS+"->"+CLASS_METHOD_TABLE+".";
 			break;
 		case INTERFACE:
 			ref = stack(++d,OBJECT_PSEUDO_TYPE); //TODO INTERFACE_PSEUDO_TYPE
 			argList[0] = ref;
 			emitReferenceCheck(ref);
 			//TODO monitorenter on ref if synchronized method
-			prefix = "((struct "+METHOD_STRUCT_PREFIX+convertClassName(owner)+"*)"+stack(d,FRAME_ANY,1)+FRAME_REFER_METHODS+")->";
+			prefix = "((struct "+METHOD_STRUCT_PREFIX+ownerType+"*)"+stack(d,FRAME_ANY,1)+FRAME_REFER_METHODS+")->";
 			break;
 		}
 		call.append(prefix).append(convertMethodName(owner,name,desc)).append("(");

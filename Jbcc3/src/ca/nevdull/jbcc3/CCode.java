@@ -23,6 +23,7 @@ public interface CCode {
 	
 	static final String OBJECT_CLASS			= "_C_";
 	static final String OBJECT_CLASS_TYPE		= "struct Class";
+	static final String OBJECT_HEAD	 			= "OBJECT_HEAD";
 
 	static final String ARRAY_STRUCT_PREFIX		= "a_";
 	static final String ARRAY_INTERFACES		= "i_Array";
@@ -41,17 +42,21 @@ public interface CCode {
 	static final String T_VOID			= "Void";
 	static final String T_ANY			= "Any";
 	static final String T_OBJECT		= "Object";
-	static final String T_ARRAY_HEAD	= T_ARRAY_+"Head";
+	static final String T_ARRAY_COMMON	= T_ARRAY_+"Common";
 
-	static final String MONITOR			= "Monitor *monitor;";
 	static final String LABEL_PTR		= "LabelPtr";
 	static final String SWITCH_PAIR		= "SwitchPair";
 	static final String STRING_CONST 	= "StringConst";
 
 	static final String ARRAY_ELEMENTS 	= "E";
-	static final String ARRAY_LENGTH 	= "L";
+	static final String ARRAY_LENGTH 	= "length";
+	static final String ARRAY_HEAD	 	= "ARRAY_HEAD";
 
 	static final String STRING_CONSTANT_STRING = "S";
+	
+	static final String METHOD_ABSTRACT	= "ABSTRACT_METHOD";
+	
+	static final String NULL_REFERENCE	= "NULL_REFERENCE";
 
 	static final String FRAME			= "_";
 	static final String FRAME_SWAP		= "_swap";
