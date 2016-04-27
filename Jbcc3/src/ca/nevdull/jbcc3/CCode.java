@@ -67,7 +67,7 @@ public interface CCode {
 	static final String FRAME_INT		= ".I";
 	static final String FRAME_LONG		= ".L";
 	static final String FRAME_REFER_OBJECT	= ".R.O";
-	static final String FRAME_REFER_METHODS	= ".R.M";
+	static final String FRAME_REFER_METHODS	= ".R.IM";
 
 	static final String INTERFACE_METHODS = "im_";
 
@@ -75,12 +75,15 @@ public interface CCode {
 	static final String LIB_D2L			= "jbcc_d2l";
 	static final String LIB_F2I			= "jbcc_f2i";
 	static final String LIB_F2L			= "jbcc_f2l";
+	static final String LIB_DREM		= "fmod";
+	static final String LIB_FREM		= "fmodf";
 	static final String LIB_IDIV		= "jbcc_idiv";
 	static final String LIB_IREM		= "jbcc_irem";
 	static final String LIB_LDIV		= "jbcc_ldiv";
 	static final String LIB_LREM		= "jbcc_lrem";
 
 	static final String LIB_CHECK_CAST	= "jbcc_check_cast";
+	static final String LIB_GET_TYPE	= "jbcc_get_type";
 	static final String LIB_INIT_STRING_CONST = "jbcc_init_string_const";
 	static final String LIB_INIT_CLASS	= "jbcc_init_class";
 	static final String LIB_INSTANCEOF	= "jbcc_instanceof";
@@ -90,9 +93,33 @@ public interface CCode {
 	static final String LIB_NEW			= "jbcc_new";
 	static final String LIB_NEW_ARRAY_ 	= "jbcc_new_array_";
 	static final String LIB_NEW_ARRAY_OBJECT = "jbcc_new_array_object";
+	static final String LIB_NEW_ARRAY_MULTI_ = "jbcc_new_array_multi_";
 	static final String LIB_THROW		= "jbcc_throw";
 	static final String LIB_THROW_ARRAY_INDEX_OUT_OF_BOUNDS_EXCEPTION = "jbcc_throw_ArrayIndexOutOfBoundsException";
 	static final String LIB_THROW_DIVISION_BY_ZERO = "jbcc_throw_DivisionByZero";
 	static final String LIB_THROW_NULL_POINTER_EXCEPTION = "jbcc_throw_NullPointerException";
+
+	static final String OPT_CLASS_INFO				= "CLASS_INFO";
+	static final String CLASS_INFO_TYPE				= "struct Class_Info";
+	static final String CLASS_INFO_ATTRIBUTE_TYPE	= "struct Attribute_Info";
+	static final String CLASS_INFO_FIELD_TYPE		= "struct Class_Field_Info";
+	static final String CLASS_INFO_INTERFACE_TYPE	= "struct Class_Interface_Info";	
+	static final String CLASS_INFO_METHOD_TYPE		= "struct Class_Method_Info";
+	static final String CLASS_INFO_UTF8Z_TYPE		= "Class_Info_UTF8z";
+
+	/** Get portion of string safe to include in a C // comment
+	 * 
+	 * @param s
+	 * @return
+	 */
+	static String safeString(String s) {
+		int trouble = s.indexOf('\n');
+		if (trouble >= 0) s = s.substring(0,trouble);
+		trouble = s.indexOf('\r');
+		if (trouble >= 0) s = s.substring(0,trouble);
+		trouble = s.indexOf('\\');
+		if (trouble >= 0) s = s.substring(0,trouble);
+		return s;
+	}
 
 }

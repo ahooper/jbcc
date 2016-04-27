@@ -4,15 +4,21 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.ListIterator;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.zip.ZipException;
 
+import org.objectweb.asm.Attribute;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.ClassNode;
@@ -22,11 +28,10 @@ import org.objectweb.asm.tree.analysis.AnalyzerException;
 
 public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 
-	private ClassCache classCache;
-
 	private PrintWriter out;
 	private File outDirectory;
 	private MethodCompiler methodCompiler;
+	private ClassCache classCache;
 	
 	static final String FILE_SUFFIX_HEADER = ".h";
 	static final String FILE_SUFFIX_CODE = ".c";
@@ -82,7 +87,8 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		compiled.add(cn.name);
 		
 		String convClassName = MethodCompiler.convertClassName(cn.name);
-        classReferences.clear();
+        typeReferences.clear();
+        classInfoStrings.clear();
 		
 		// Produce class include header
 
@@ -93,13 +99,15 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		if (cn.superName != null) {
 			out.println("#include \""+compiledFileName(cn.superName,FILE_SUFFIX_HEADER)+"\"");
 		}
-        referenceClass(cn.name);
+        referenceTypeClass(cn.name);
 
         // class references
+/*
 		for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
             String intfc = cn.interfaces.get(ix);
             referenceClass(intfc);
 		}
+*/
 		for (int fx = 0; fx < cn.fields.size(); ++fx) {
             FieldNode field = cn.fields.get(fx);
             referenceType(Type.getType(field.desc));
@@ -117,6 +125,7 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
         	// these could conceivably go in a separate include file only children would use
         	declareMethod(cn.name, method);
         }
+		referenceInterfaceTypes(cn);  // to generate typedefs
 		
 		/*
 		cn.accept(this);
@@ -124,17 +133,23 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		
         // virtual method table
         out.println("struct "+METHOD_STRUCT_PREFIX+convClassName+" {");
-		LinkedHashMap<String, String> virtualMethodTable = inheritedMethodTable(cn,false/*silent*/);
-        out.println("};");
-        
-        // interface list
-        LinkedHashMap<String,LinkedHashMap<String, String>> interfacesList = new LinkedHashMap<String,LinkedHashMap<String, String>>();
-		for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
-            String intfc = cn.interfaces.get(ix);
-            String convIntfcName = MethodCompiler.convertClassName(intfc);
-    		LinkedHashMap<String, String> interfaceMethodTable = inheritedInterfaceTable(cn,intfc);
-    		interfacesList.put(convIntfcName, interfaceMethodTable);
+        //##LinkedHashMap<String, String> virtualMethodTable = inheritedMethodTable(cn,false/*fromInterface*/,false/*silent*/);
+        LinkedHashMap<String,String> methodPrototypes = new LinkedHashMap<String,String>();
+	    LinkedHashMap<String,String> methodInstances = new LinkedHashMap<String,String>();
+		collectInheritedMethods(methodPrototypes, methodInstances, cn, true/*followSuperclass*/);
+		for (String nameAndDesc : methodPrototypes.keySet()) {
+			out.println("    "+methodPrototypes.get(nameAndDesc));
 		}
+        out.println("};");
+
+        //##// interface list
+        //##LinkedHashMap<String,LinkedHashMap<String, String>> interfacesList = new LinkedHashMap<String,LinkedHashMap<String, String>>();
+        //##for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
+        //##    String intfc = cn.interfaces.get(ix);
+        //##    String convIntfcName = MethodCompiler.convertClassName(intfc);
+        //##	LinkedHashMap<String, String> interfaceMethodTable = inheritedInterfaceTable(cn,intfc);
+        //##	interfacesList.put(convIntfcName, interfaceMethodTable);
+        //##}
 		
 		// inherited static methods
 		LinkedHashSet<String> inheritedStaticMethods = new LinkedHashSet<String>();
@@ -214,6 +229,7 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		
 		// collect all class references
 		ClassReferences references = new ClassReferences(out);
+		referenceRequired(cn, references);  // to generate includes
 		for (int mx = 0; mx < cn.methods.size(); ++mx) {
             MethodNode method = cn.methods.get(mx);
             methodCompiler.compileClassReferences(method,references);
@@ -234,27 +250,46 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		// interface method tables
 		// no class-specific interface static fields, I think
     	boolean classIsInterface = (cn.access & Opcodes.ACC_INTERFACE) != 0;
+    	//##if (classIsInterface) {
+    	//##	// an interface implements its own interface
+    	//##	// this will be a duplicate of the class method table with the exception of java.lang.Object methods
+    	//##	out.println("static struct "+METHOD_STRUCT_PREFIX+convClassName+" "+METHOD_STRUCT_PREFIX+convClassName+"_"+convClassName+" = {");
+    	//##	for (Entry<String, String> ent : virtualMethodTable.entrySet()) {
+    	//##		out.println("        "+ent.getValue()+",");
+    	//##	}
+    	//##	out.println("};");
+    	//##}
+    	//##for (Entry<String, LinkedHashMap<String, String>> intfcEnt : interfacesList.entrySet()) {
+    	//##	String convIntfcName = intfcEnt.getKey();
+    	//##	out.println("static struct "+METHOD_STRUCT_PREFIX+convIntfcName+" "+METHOD_STRUCT_PREFIX+convClassName+"_"+convIntfcName+" = {");
+    	//##	for (Entry<String, String> ent : intfcEnt.getValue().entrySet()) {
+    	//##		out.println("    "+ent.getValue()+",");
+    	//##	}
+    	//##	out.println("};");
+    	//##}
+		if (classIsInterface) {
+        	out.println("static struct "+METHOD_STRUCT_PREFIX+convClassName+" "+METHOD_STRUCT_PREFIX+convClassName+"_"+convClassName+" = {");
+		    LinkedHashMap<String,String> intfcPrototypes = new LinkedHashMap<String,String>();
+		    LinkedHashMap<String,String> intfcInstances = new LinkedHashMap<String,String>();
+			collectInterfaceMethods(intfcPrototypes, intfcInstances, cn, cn);
+			for (String nameAndDesc : intfcPrototypes.keySet()) {
+				out.println("    "+intfcInstances.get(nameAndDesc)+",");
+			}
+	    	out.println("};");
+		}
 		for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
             String intfc = cn.interfaces.get(ix);
-            out.println("#include \""+compiledFileName(intfc,FILE_SUFFIX_HEADER)+"\"");
-		}
-		if (classIsInterface) {
-			// an interface implements its own interface
-			// this will be a duplicate of the class method table
-    		out.println("static struct "+METHOD_STRUCT_PREFIX+convClassName+" "+METHOD_STRUCT_PREFIX+convClassName+"_"+convClassName+" = {");
-			for (Entry<String, String> ent : virtualMethodTable.entrySet()) {
-				out.println("        "+ent.getValue()+",");
+		    ClassNode intfcNode = classCache.get(intfc);
+        	String convIntfcName = MethodCompiler.convertClassName(intfc);
+        	out.println("static struct "+METHOD_STRUCT_PREFIX+convIntfcName+" "+METHOD_STRUCT_PREFIX+convClassName+"_"+convIntfcName+" = {");
+		    LinkedHashMap<String,String> intfcPrototypes = new LinkedHashMap<String,String>();
+		    LinkedHashMap<String,String> intfcInstances = new LinkedHashMap<String,String>();
+			collectInterfaceMethods(intfcPrototypes, intfcInstances, cn, intfcNode);
+			for (String nameAndDesc : intfcPrototypes.keySet()) {
+				out.println("    "+intfcInstances.get(nameAndDesc)+",");
 			}
-    		out.println("};");
+	    	out.println("};");
 		}
-        for (Entry<String, LinkedHashMap<String, String>> intfcEnt : interfacesList.entrySet()) {
-        	String convIntfcName = intfcEnt.getKey();
-    		out.println("static struct "+METHOD_STRUCT_PREFIX+convIntfcName+" "+METHOD_STRUCT_PREFIX+convClassName+"_"+convIntfcName+" = {");
-    		for (Entry<String, String> ent : intfcEnt.getValue().entrySet()) {
-    			out.println("    "+ent.getValue()+",");
-    		}
-    		out.println("};");
-        }
 		out.println("static struct Interface_List_Entry "+CLASS_INTERFACES_PREFIX+convClassName+"[] = {");
 		if (classIsInterface) {
 			// an interface implements its own interface
@@ -273,13 +308,51 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		out.println("};");
 
 		// static string value arrays
+		HashSet<String> staticStringValue = new HashSet<String>();
 		for (int fx = 0; fx < cn.fields.size(); ++fx) {
 			FieldNode field = cn.fields.get(fx);
 			if ((field.access & Opcodes.ACC_STATIC) != 0) {
 				Object iv = field.value;
-				if (iv != null && iv instanceof String) putStaticStringValue(iv.toString()); 
+				if (iv != null && iv instanceof String) {
+					String siv = (String)iv;
+					if (!staticStringValue.contains(iv)) {  // avoid duplicates
+						putStaticStringValue(siv);
+						staticStringValue.add(siv);
+					}
+				}
 			}
 		}
+		
+		// class reflection information : class, fields, interfaces, methods
+		// IDEA: could just write the class file data, with the method code attributes deleted
+		out.println("#ifdef "+OPT_CLASS_INFO);
+		ArrayList<String> classInfo = new ArrayList<String>();
+		classInfo.add("static "+CLASS_INFO_TYPE+" info = {");
+		classInfo.add("    .access_flags = 0x"+Integer.toHexString(cn.access)+",");
+	    classInfo.add("    .this_class = &"+putClassInfoString(cn.name)+","); // TODO direct class data pointer
+	    if (cn.superName != null) {
+	    	classInfo.add("    .super_class = &"+putClassInfoString(cn.superName)+","); // TODO direct class data pointer
+	    } else {
+	    	classInfo.add("    .super_class = 0,");
+	    }
+		classInfo.add("    .interfaces_count = "+cn.interfaces.size()+",");
+		classInfo.add("    .interfaces = &"+putClassInterfaces(cn.interfaces)+",");
+		classInfo.add("    .fields_count = "+cn.fields.size()+",");
+		classInfo.add("    .fields = &"+putClassFields(cn.fields)+",");
+		classInfo.add("    .methods_count = "+cn.methods.size()+",");
+		classInfo.add("    .methods = &"+putClassMethods(cn.methods)+",");
+		if (cn.attrs != null) {
+			classInfo.add("    .attributes_count = "+cn.attrs.size()+",");
+			classInfo.add("    .attributes = &"+putClassAttributes(cn.attrs)+",");
+		} else {
+			classInfo.add("    .attributes_count = 0,");
+			classInfo.add("    .attributes = 0,");
+		}
+		classInfo.add("};");
+		for (String ci : classInfo) {
+			out.println(ci);
+		}
+		out.println("#endif /*"+OPT_CLASS_INFO+"*/");
         
 		// class structure
 		out.println("struct "+CLASS_STRUCT_PREFIX+convClassName+" "+CLASS_STRUCT_PREFIX+convClassName+" = {");
@@ -287,6 +360,7 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		out.println("        ."+CLASS_OBJ_SIZE+" = sizeof(struct "+OBJECT_STRUCT_PREFIX+convClassName+"),");
 		out.println("        ."+CLASS_INTERFACES+" = "+CLASS_INTERFACES_PREFIX+convClassName+",");
 		out.println("        ."+CLASS_NAME+" = \""+cn.name.replace('/','.')+"\",");
+		//TODO class_info link
 		for (int mx = 0; mx < cn.methods.size(); ++mx) {
             MethodNode method = cn.methods.get(mx);
             if (method.name.equals("<clinit>") 
@@ -298,8 +372,11 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		}
 		out.println("        ."+CLASS_INITIALIZED+" = 0 },");
 		out.println("    ."+CLASS_METHOD_TABLE+" = { /*struct "+METHOD_STRUCT_PREFIX+convClassName+"*/");
-		for (Entry<String, String> ent : virtualMethodTable.entrySet()) {
-			out.println("        "+ent.getValue()+",");
+		//##for (Entry<String, String> ent : virtualMethodTable.entrySet()) {
+		//##	out.println("        "+ent.getValue()+",");
+		//##}
+		for (String nameAndDesc : methodPrototypes.keySet()) {
+			out.println("        "+methodInstances.get(nameAndDesc)+",");
 		}
 		out.println("    },");
 		out.println("    ."+CLASS_STATIC_FIELDS+" = {");
@@ -346,7 +423,7 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		if (cn.superName != null && !compiled.contains(cn.superName)) classQueue.add(cn.superName);
 
 	}
-	
+
 	private void putStaticStringValue(String string) {
 		String stringID = staticStringID(string);
 		
@@ -376,24 +453,126 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 	private void putStaticString(String string) {
 		out.print("&"+staticStringID(string));
 	}
-
-	private LinkedHashMap<String,String> inheritedMethodTable(ClassNode cn, boolean silent) throws FileNotFoundException, ClassNotFoundException, IOException {
-		LinkedHashMap<String,String> table;
-		if (cn.superName == null) {
-			table = new LinkedHashMap<String,String>();
-		} else {
-			table = inheritedMethodTable(classCache.get(cn.superName), silent);
+	
+	HashSet<String> classInfoStrings = new HashSet<String>();
+	private String putClassInfoString(String string) {
+		String name = "CS"+Integer.toString(System.identityHashCode(string),36);
+		if (classInfoStrings.contains(string)) return name;
+		classInfoStrings.add(string);
+		out.print("static "+CLASS_INFO_UTF8Z_TYPE+" "+name+" = \"");
+		ByteBuffer utf8Bytes = StandardCharsets.UTF_8.encode(string);
+		for (int n = utf8Bytes.remaining();  n-- > 0; ) {
+			byte b = utf8Bytes.get();
+			if (b >= 32 && b < 127) out.print((char)b);
+			else { out.print("\\x"); out.print(Integer.toHexString(b)); }	
 		}
+		out.println("\";");
+		return name;
+	}
+
+	private String putClassAttributes(List<Attribute> attrs) {
+		String name = "attributes";
+		ArrayList<String> list = new ArrayList<String>();
+		for (int ax = 0; ax < attrs.size(); ++ax) {
+            Attribute attr = attrs.get(ax);
+    		// TODO Auto-generated method stub
+		}
+		for (String s : list) {
+			out.println(s);
+		}
+		return name;
+	}
+
+	private String putClassFields(List<FieldNode> fields) {
+		String name = "fields";
+		ArrayList<String> list = new ArrayList<String>();
+		list.add("static "+CLASS_INFO_FIELD_TYPE+" "+name+"[] = {");
+		for (int fx = 0; fx < fields.size(); ++fx) {
+            FieldNode field = fields.get(fx);
+            list.add(putNameAndDesc(field.access,field.name,field.desc,field.attrs));
+		}
+		list.add("};");
+		for (String s : list) {
+			out.println(s);
+		}
+		return name;
+	}
+
+	private String putClassInterfaces(List<String> interfaces) {
+		String name = "interfaces";
+		ArrayList<String> list = new ArrayList<String>();
+		list.add("static "+CLASS_INFO_INTERFACE_TYPE+" "+name+"[] = {");
+		for (int ix = 0; ix < interfaces.size(); ++ix) {
+            String intfc = interfaces.get(ix);
+    		list.add("    {&"+putClassInfoString(intfc)
+		      			+"}, // "+intfc);
+		}
+		list.add("};");
+		for (String s : list) {
+			out.println(s);
+		}
+		return name;
+	}
+
+	private String putClassMethods(List<MethodNode> methods) {
+		String name = "methods";
+		ArrayList<String> list = new ArrayList<String>();
+		list.add("static "+CLASS_INFO_METHOD_TYPE+" "+name+"[] = {");
+		for (int mx = 0; mx < methods.size(); ++mx) {
+            MethodNode method = methods.get(mx);
+            list.add(putNameAndDesc(method.access,method.name,method.desc,method.attrs));
+		}
+		list.add("};");
+		for (String s : list) {
+			out.println(s);
+		}
+		return name;
+	}
+
+	private String putNameAndDesc(int access, String name, String desc, List<Attribute> attrs) {
+		return "    {0x"+Integer.toHexString(access)
+		      +",&"+putClassInfoString(name)
+		      +",&"+putClassInfoString(desc)
+		      +"}, // "+accessToString(access)+" "+name+" "+desc;
+		//TODO attributes
+	}
+
+	//OBSOLETE
+	private LinkedHashMap<String,String> inheritedMethodTable(ClassNode cn, boolean fromInterface, boolean silent) throws FileNotFoundException, ClassNotFoundException, IOException {
+		LinkedHashMap<String,String> table;
+		
+		// start with superclass methods
+		if (cn.superName == null || fromInterface) {
+			table = new LinkedHashMap<String,String>();
+		} else  {
+			table = inheritedMethodTable(classCache.get(cn.superName), fromInterface, silent);
+		}
+		// interface methods
+		for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
+		    String intfc = cn.interfaces.get(ix);
+		    LinkedHashMap<String, String> it = inheritedMethodTable(classCache.get(intfc), true/*fromInterface*/, true);
+		    for (Entry<String, String> itEnt : it.entrySet() ) {
+		        String nameAndDesc = itEnt.getKey();
+		        if (!table.containsKey(nameAndDesc)) {
+		        	//if (Main.opt_debug) System.out.println("    "+cn.name+" include interface "+intfc+" "+nameAndDesc);
+		        	table.put(nameAndDesc, itEnt.getValue());
+		        }
+		    }
+		}
+		// class member methods
 		String convClassName = MethodCompiler.convertClassName(cn.name);
 		for (int mx = 0; mx < cn.methods.size(); ++mx) {
 		    MethodNode method = cn.methods.get(mx);
 			if ((method.access & Opcodes.ACC_STATIC) == 0) {
 		        String nameAndDesc = method.name + method.desc;
+		        // TODO signature polymorphic methods 
 		        String override = "";
 		        if (table.containsKey(nameAndDesc)) {
+		        	if (fromInterface) continue;  // don't override with a method from an interface
 		        	override = "/*override-incompatible pointer types*/";
 		        } else {
 		        	if (!silent) {
+			        	//if (Main.opt_debug) System.out.println("    "+cn.name+" member "+nameAndDesc);
 			    		out.print("    ");
 			    		declareMethodPointer(cn.name, method, convClassName);
 		        	}
@@ -409,8 +588,58 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		return table;
 	}
 
-	private LinkedHashMap<String, String> inheritedInterfaceTable(ClassNode cn, String intfc) throws FileNotFoundException, ClassNotFoundException, IOException {
-		LinkedHashMap<String, String> table = inheritedMethodTable(classCache.get(intfc), true/*silent*/);
+ 	private void collectInheritedMethods(LinkedHashMap<String,String> prototypes,
+										 LinkedHashMap<String,String> instances,
+										 ClassNode cn,
+										 boolean followSuperclass)
+										 throws FileNotFoundException, ClassNotFoundException, IOException {
+		// start with superclass methods
+		if (cn.superName != null && followSuperclass) {
+			collectInheritedMethods(prototypes, instances, classCache.get(cn.superName), followSuperclass);
+		}
+		// interface methods
+		for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
+		    String intfc = cn.interfaces.get(ix);
+		    ClassNode intfcNode = classCache.get(intfc);
+		    LinkedHashMap<String,String> intfcPrototypes = new LinkedHashMap<String,String>();
+		    LinkedHashMap<String,String> intfcInstances = new LinkedHashMap<String,String>();
+			collectInheritedMethods(intfcPrototypes, intfcInstances, intfcNode, false/*followSuperclass*/);
+		    for (String nameAndDesc : intfcPrototypes.keySet() ) {
+		        if (!prototypes.containsKey(nameAndDesc)) {
+		        	if (Main.opt_debug) System.out.println("    "+cn.name+" include interface "+intfc+" "+nameAndDesc);
+		        	prototypes.put(nameAndDesc, intfcPrototypes.get(nameAndDesc));
+		        	instances.put(nameAndDesc, intfcInstances.get(nameAndDesc));
+		        }
+		    }
+		}
+		// class member methods
+		String convClassName = MethodCompiler.convertClassName(cn.name);
+		for (int mx = 0; mx < cn.methods.size(); ++mx) {
+		    MethodNode method = cn.methods.get(mx);
+			if ((method.access & Opcodes.ACC_STATIC) == 0) {
+		        String nameAndDesc = method.name + method.desc;
+		        // TODO signature polymorphic methods 
+		        String override = "";
+		        if (prototypes.containsKey(nameAndDesc)) {
+		        	override = "/*override-incompatible pointer types*/";
+		        } else {
+		        	prototypes.put(nameAndDesc, methodPrototype("(*"+MethodCompiler.convertMethodName(method.name,method.desc)+")", method, convClassName));
+		        	if (Main.opt_debug) System.out.println("    "+cn.name+" member "+nameAndDesc);
+		        }
+		        String initName = "."+MethodCompiler.convertMethodName(method.name,method.desc)+" = ";
+		        String extName = MethodCompiler.externalMethodName(cn.name, method);
+				if ((method.access & Opcodes.ACC_ABSTRACT) != 0) {
+					instances.put(nameAndDesc, initName+METHOD_ABSTRACT+"/*"+extName+"*/");
+		        } else  {
+		        	instances.put(nameAndDesc, initName+override+"&"+extName);
+		 		}
+			}
+		}
+	}
+ 
+	//OBSOLETE
+ 	private LinkedHashMap<String, String> inheritedInterfaceTable(ClassNode cn, String intfc) throws FileNotFoundException, ClassNotFoundException, IOException {
+		LinkedHashMap<String, String> table = inheritedMethodTable(classCache.get(intfc), true/*fromInterface*/, true/*silent*/);
 		for (int mx = 0; mx < cn.methods.size(); ++mx) {
 		    MethodNode method = cn.methods.get(mx);
 			if ((method.access & Opcodes.ACC_STATIC) == 0) {
@@ -428,6 +657,43 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 			}
 		}
 		return table;
+	}
+
+	private void collectInterfaceMethods(LinkedHashMap<String,String> prototypes,
+										 LinkedHashMap<String,String> instances,
+										 ClassNode cn,
+										 ClassNode intfc)
+										 throws FileNotFoundException, ClassNotFoundException, IOException {
+		// interface methods
+		LinkedHashMap<String,String> intfcPrototypes = new LinkedHashMap<String,String>();
+	    LinkedHashMap<String,String> intfcInstances = new LinkedHashMap<String,String>();
+		collectInheritedMethods(intfcPrototypes, intfcInstances, intfc, true/*followSuperclass*/);
+	    for (String nameAndDesc : intfcPrototypes.keySet() ) {
+	        if (!prototypes.containsKey(nameAndDesc)) {
+	        	if (Main.opt_debug) System.out.println("    "+intfc.name+" include interface "+intfc.name+" "+nameAndDesc);
+	        	prototypes.put(nameAndDesc, intfcPrototypes.get(nameAndDesc));
+	        	instances.put(nameAndDesc, intfcInstances.get(nameAndDesc));
+	        }
+	    }
+		// class member methods
+		for (int mx = 0; mx < cn.methods.size(); ++mx) {
+		    MethodNode method = cn.methods.get(mx);
+			if ((method.access & Opcodes.ACC_STATIC) == 0) {
+		        String nameAndDesc = method.name + method.desc;
+		        // TODO signature polymorphic methods 
+		        if (prototypes.containsKey(nameAndDesc)) {
+		        	// include only if overriding, i.e. the interface requires the method
+		        	String override = "/*override-incompatible pointer types*/";
+			        String initName = "."+MethodCompiler.convertMethodName(method.name,method.desc)+" = ";
+			        String extName = MethodCompiler.externalMethodName(cn.name, method);
+					if ((method.access & Opcodes.ACC_ABSTRACT) != 0) {
+						instances.put(nameAndDesc, initName+METHOD_ABSTRACT+"/*"+extName+"*/");
+			        } else  {
+			        	instances.put(nameAndDesc, initName+override+"&"+extName);
+			 		}
+		        }
+			}
+		}
 	}
 	
 	private ListIterator<String> inheritedFieldsTable(ClassNode cn) throws FileNotFoundException, ClassNotFoundException, IOException {
@@ -453,23 +719,55 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		return new ArrayList<String>(table.values()).listIterator(table.size());
 	}
 
-	private HashSet<String> classReferences = new HashSet<String>();
-	private void referenceClass(String internalName) {
-		if (!classReferences.contains(internalName)) {
+	private HashSet<String> typeReferences = new HashSet<String>();
+	private void referenceTypeClass(String internalName) {
+		if (!typeReferences.contains(internalName)) {
 			String convClassName = MethodCompiler.convertClassName(internalName);
 			out.println("typedef struct "+OBJECT_STRUCT_PREFIX+convClassName+" *"+convClassName+";");
 			out.println("typedef struct "+ARRAY_STRUCT_PREFIX+convClassName+" *"+T_ARRAY_+convClassName+";");
-			classReferences.add(internalName);
+			typeReferences.add(internalName);
 		}
 	}
 	
 	void referenceType(Type type) {
 		int s = type.getSort();
 		if (s == Type.OBJECT) {
-			referenceClass(type.getInternalName());
+			referenceTypeClass(type.getInternalName());
 		} else if (s == Type.ARRAY) {
 			Type elemType = type.getElementType();
 			referenceType(elemType);
+		}
+	}
+
+	private void referenceInterfaceTypes(ClassNode cn) throws FileNotFoundException, ClassNotFoundException, IOException {
+		for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
+            String intfc = cn.interfaces.get(ix);
+            referenceTypeClass(intfc);
+            ClassNode intfcNode = classCache.get(intfc);
+			referenceInterfaceTypes(intfcNode);
+			for (int mx = 0; mx < intfcNode.methods.size(); ++mx) {
+	            MethodNode method = intfcNode.methods.get(mx);
+	    		for (Type argType : Type.getArgumentTypes(method.desc)) {
+	    			referenceType(argType);
+	    		}
+				referenceType(Type.getReturnType(method.desc));
+	        }
+		}
+	}
+
+	private void referenceRequired(ClassNode cn, ClassReferences references) throws FileNotFoundException, ClassNotFoundException, IOException {
+		for (int mx = 0; mx < cn.methods.size(); ++mx) {
+            MethodNode method = cn.methods.get(mx);
+    		for (Type argType : Type.getArgumentTypes(method.desc)) {
+    			references.typeReference(argType);
+    		}
+    		references.typeReference(Type.getReturnType(method.desc));
+        }
+		for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
+            String intfc = cn.interfaces.get(ix);
+            references.classReference(intfc);
+            ClassNode intfcNode = classCache.get(intfc);
+			referenceRequired(intfcNode, references);
 		}
 	}
 
@@ -486,29 +784,56 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 	private void declareMethod(String className, MethodNode method) {
 		if ((method.access & Opcodes.ACC_NATIVE) != 0) out.print("/*NATIVE*/ ");
 		out.print("extern ");
-		putMethodPrototype(MethodCompiler.externalMethodName(className, method), method, MethodCompiler.convertClassName(className));
+		out.println(methodPrototype(MethodCompiler.externalMethodName(className, method), method, MethodCompiler.convertClassName(className)));
 	}
     
 	private void declareMethodPointer(String className, MethodNode method, String thisType) {
-		putMethodPrototype("(*"+MethodCompiler.convertMethodName(className, method.name,method.desc)+")", method, thisType);
+		out.println(methodPrototype("(*"+MethodCompiler.convertMethodName(method.name,method.desc)+")", method, thisType));
 	}
 
-	private void putMethodPrototype(String name, MethodNode method, String thisType) {
-		out.print(MethodCompiler.convertType(Type.getReturnType(method.desc))+" "+name+"(");
+	private String methodPrototype(String name, MethodNode method, String thisType) {
+		StringBuilder r = new StringBuilder();
+		r.append(MethodCompiler.convertType(Type.getReturnType(method.desc))+" "+name+"(");
 		String sep = "";
     	if ((method.access & Opcodes.ACC_STATIC) == 0) {
-			out.print(thisType);
+    		r.append(thisType);
 			sep = ",";
 		}
 		for (Type argType : Type.getArgumentTypes(method.desc)) {
-			out.print(sep);  sep = ",";
-			out.print(MethodCompiler.convertType(argType));
+			r.append(sep);  sep = ",";
+			r.append(MethodCompiler.convertType(argType));
 		}
-		out.println(");");
+		r.append(");");
+		return r.toString();
 	}
 
 	private void declareField(FieldNode field) {
 		out.println(MethodCompiler.convertTypeDesc(field.desc)+" "+MethodCompiler.escapeName(field.name)+";");
+	}
+
+	static String accessToString(int access) {
+		StringBuilder s = new StringBuilder();
+		if ((access & ACC_PUBLIC) != 0)		s.append("Pub");
+		if ((access & ACC_PRIVATE) != 0)	s.append("Pri");
+		if ((access & ACC_PROTECTED) != 0)	s.append("Pro");
+		if ((access & ACC_STATIC) != 0)		s.append("Sta");
+		if ((access & ACC_FINAL) != 0)		s.append("Fin");
+		if ((access & ACC_SUPER) != 0)		s.append("Sup");
+		if ((access & ACC_SYNCHRONIZED) != 0)	s.append("Syn");
+		if ((access & ACC_VOLATILE) != 0)	s.append("Vol");
+		if ((access & ACC_BRIDGE) != 0)		s.append("Bri");
+		if ((access & ACC_VARARGS) != 0)	s.append("Var");
+		if ((access & ACC_TRANSIENT) != 0)	s.append("Tra");
+		if ((access & ACC_NATIVE) != 0)		s.append("Nat");
+		if ((access & ACC_INTERFACE) != 0)	s.append("Int");
+		if ((access & ACC_ABSTRACT) != 0)	s.append("Abs");
+		if ((access & ACC_STRICT) != 0)		s.append("Str");
+		if ((access & ACC_SYNTHETIC) != 0)	s.append("Sth");
+		if ((access & ACC_ANNOTATION) != 0)	s.append("Ann");
+		if ((access & ACC_ENUM) != 0)		s.append("Enu");
+		if ((access & ACC_MANDATED) != 0)	s.append("Man");
+		if ((access & ACC_DEPRECATED) != 0)	s.append("Dep");
+		return s.toString();
 	}
 
 /*
@@ -519,31 +844,6 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		for (String ifc : interfaces) {
 			out.println("Interface "+ifc);
 		}
-	}
-
-	static String accessToString(int access) {
-		StringBuilder s = new StringBuilder();
-		if ((access & ACC_PUBLIC) != 0)		s.append("Pb");
-		if ((access & ACC_PRIVATE) != 0)	s.append("Pv");
-		if ((access & ACC_PROTECTED) != 0)	s.append("Pt");
-		if ((access & ACC_STATIC) != 0)		s.append("St");
-		if ((access & ACC_FINAL) != 0)		s.append("Fn");
-		if ((access & ACC_SUPER) != 0)		s.append("Su");
-		if ((access & ACC_SYNCHRONIZED) != 0)	s.append("Sy");
-		if ((access & ACC_VOLATILE) != 0)	s.append("Vo");
-		if ((access & ACC_BRIDGE) != 0)		s.append("Br");
-		if ((access & ACC_VARARGS) != 0)	s.append("Va");
-		if ((access & ACC_TRANSIENT) != 0)	s.append("Tr");
-		if ((access & ACC_NATIVE) != 0)		s.append("Na");
-		if ((access & ACC_INTERFACE) != 0)	s.append("In");
-		if ((access & ACC_ABSTRACT) != 0)	s.append("Ab");
-		if ((access & ACC_STRICT) != 0)		s.append("Sr");
-		if ((access & ACC_SYNTHETIC) != 0)	s.append("Sy");
-		if ((access & ACC_ANNOTATION) != 0)	s.append("An");
-		if ((access & ACC_ENUM) != 0)		s.append("En");
-		if ((access & ACC_MANDATED) != 0)	s.append("Md");
-		if ((access & ACC_DEPRECATED) != 0)	s.append("Dp");
-		return s.toString();
 	}
 
 	@Override

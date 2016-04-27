@@ -180,11 +180,11 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	}
 
 	public static String externalMethodName(String owner, MethodNode method) {
-		return convertClassName(owner)+"_"+convertMethodName(owner,method.name,method.desc);
+		return convertClassName(owner)+"_"+convertMethodName(method.name,method.desc);
 	}
 
-	public static String convertMethodName(String owner, String name, String desc) {
-		int descHash = (/*owner+*/desc).hashCode();
+	public static String convertMethodName(String name, String desc) {
+		int descHash = (desc).hashCode();
 		String sig = (descHash >= 0) ? Integer.toString(descHash, 36)
 				 					: "M"+Integer.toString(-descHash, 36);
 		if (Character.isJavaIdentifierStart(name.charAt(0))) {
@@ -383,7 +383,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		emit(stack(0,type)+" = "+LIB_NEW+"("+classPointer(type)+"."+CLASS_CLASS+");");
 	}
 
-	private String classPointer(Type type) {
+	static String classPointer(Type type) {
 		return "("+OBJECT_CLASS_TYPE+"*)&"+CLASS_STRUCT_PREFIX+convertType(type);
 	}
 
@@ -417,6 +417,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			// TODO monitorexit?
 		}
 		emit(LIB_THROW+"("+stack(1,OBJECT_PSEUDO_TYPE)+");");
+		emit("/*NOTREACHED*/ // control reaches end of non-void function");
 	}
 
 	@Override
@@ -492,7 +493,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	}
 	
 	static String doubleLiteral(double v) {
-		if (Double.isNaN(v)) return "NAN";
+		if (Double.isNaN(v)) return "FLOAT_NAN";
 		else if (Double.isInfinite(v)) return (v > 0.0) ? "HUGE_VAL" : "-HUGE_VAL";
 		else return Double.toString(v);
 	}
@@ -683,7 +684,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	}
 	
 	static String floatLiteral(float v) {
-		if (Float.isNaN(v)) return "NAN";
+		if (Float.isNaN(v)) return "FLOAT_NAN";
 		else if (Float.isInfinite(v)) return (v > 0.0) ? "HUGE_VALF" : "-HUGE_VALF";
 		else return Float.toString(v)+"F";
 	}
@@ -963,7 +964,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			prefix = "((struct "+METHOD_STRUCT_PREFIX+ownerType+"*)"+stack(d,FRAME_ANY,1)+FRAME_REFER_METHODS+")->";
 			break;
 		}
-		call.append(prefix).append(convertMethodName(owner,name,desc)).append("(");
+		call.append(prefix).append(convertMethodName(name,desc)).append("(");
 		String sep = "";
 		for (int i = 0;  i < argList.length;  ++i) {
 			call.append(sep);  sep = ",";
@@ -1046,8 +1047,51 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void multianewarray(String desc, int dims) {
-		// TODO 
-		unimplemented("multianewarray "+desc+" "+dims);
+		Type type = Type.getType(desc);
+		StringBuilder args = new StringBuilder();
+		args.append(dims);
+		for (int d = dims;  d > 0;  d--) {
+			args.append(',').append(stack(d,Type.INT_TYPE));
+		}
+		Type elemType = type;
+		while (elemType.getSort() == Type.ARRAY) elemType = elemType.getElementType();
+		String at;
+        switch (elemType.getSort()) {
+        case Type.BOOLEAN:
+        	at = T_BOOLEAN;
+        	break;
+        case Type.CHAR:
+        	at = T_CHAR;
+        	break;
+        case Type.BYTE:
+        	at = T_BYTE;
+        	break;
+        case Type.SHORT:
+        	at = T_SHORT;
+        	break;
+        case Type.INT:
+        	at = T_INT;
+            break;
+        case Type.FLOAT:
+        	at = T_FLOAT;
+            break;
+        case Type.LONG:
+        	at = T_LONG;
+            break;
+        case Type.DOUBLE:
+        	at = T_DOUBLE;
+            break;
+        case Type.ARRAY:
+        	at = T_BOOLEAN;
+            break;
+        // case Type.OBJECT:
+        default:
+        	// we don't have a T_ for objects, so this finishes the method here
+        	at = "object";
+    		emit(stack(dims,type)+" = "+LIB_NEW_ARRAY_MULTI_+"object"+"("+classPointer(elemType)+","+args+");");
+        	return;
+		}
+		emit(stack(dims,type)+" = "+LIB_NEW_ARRAY_MULTI_+at+"("+args+");");
 	}
 
 	@Override
@@ -1137,6 +1181,10 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			emit(stack(2,type)+" = "+LIB_IREM+"("+stack(2,type)+", "+stack(1,type)+");");
 		} else if (type == Type.LONG_TYPE) {
 			emit(stack(2,type)+" = "+LIB_LREM+"("+stack(2,type)+", "+stack(1,type)+");");
+		} else if (type == Type.DOUBLE_TYPE) {
+			emit(stack(2,type)+" = "+LIB_DREM+"("+stack(2,type)+", "+stack(1,type)+");");
+		} else if (type == Type.FLOAT_TYPE) {
+			emit(stack(2,type)+" = "+LIB_FREM+"("+stack(2,type)+", "+stack(1,type)+");");
 		} else {
 			emit("if ("+stack(1,type)+" == "+zero(type)+") "+LIB_THROW_DIVISION_BY_ZERO+"();");
 			dyadic(type," % ");
@@ -1212,8 +1260,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void tconst(Type type) {
-		// TODO
-		emit(stack(0,OBJECT_PSEUDO_TYPE)+" = *TODO*Class:"+type.getInternalName()+";");
+		emit(stack(0,OBJECT_PSEUDO_TYPE)+" = "+LIB_GET_TYPE+"("+classPointer(type)+");");
 	}
 
 	@Override

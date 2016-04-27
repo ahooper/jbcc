@@ -42,11 +42,7 @@ public class StringConstants extends MethodVisitor implements CCode {
 		String sep = "";
 		for (char ch : scon.toCharArray()) {out.print(sep); sep = ","; out.print((int)ch); }
 		out.print("}"+lineEnd+" // ");
-		String s = scon;
-		int newline = s.indexOf('\n');
-		if (newline >= 0) s = s.substring(0,newline);
-		while (s.endsWith("\\")) s = s.substring(0,s.length()-1);
-		out.println(s);
+		out.println(CCode.safeString(scon));
 	}
 
 	public String get(String scon) {
