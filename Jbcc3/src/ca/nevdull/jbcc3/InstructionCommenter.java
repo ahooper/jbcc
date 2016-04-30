@@ -86,7 +86,7 @@ public class InstructionCommenter extends MethodVisitor {
 	public void visitLdcInsn(Object cst) {
 		out.print("\t// Ldc\t"+cst.getClass().getSimpleName()+" ");
 		if (cst instanceof String) {
-			out.println(CCode.safeString((String)cst));
+			out.println(CCode.safeCommentSubstring((String)cst));
 		} else {
 			out.println(cst);
 		}

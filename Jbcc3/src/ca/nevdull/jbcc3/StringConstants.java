@@ -28,7 +28,7 @@ public class StringConstants extends MethodVisitor implements CCode {
     		String scon = (String)cst;
     		if (!stringConstants.containsKey(scon)) {
 		        String scn = STRING_CONSTANT_STRING+Integer.toString(System.identityHashCode(scon),36);
-		        out.print("static "+STRING_CONST+" "+scn+" = {0,"+scon.length()+",");
+		        out.print("static "+STRING_CONST_TYPE+" "+scn+" = {0,"+scon.length()+",");
 		        putStringCharArray(scon,"};");
 		        stringConstants.put(scon,scn);
     		}
@@ -42,7 +42,7 @@ public class StringConstants extends MethodVisitor implements CCode {
 		String sep = "";
 		for (char ch : scon.toCharArray()) {out.print(sep); sep = ","; out.print((int)ch); }
 		out.print("}"+lineEnd+" // ");
-		out.println(CCode.safeString(scon));
+		out.println(CCode.safeCommentSubstring(scon));
 	}
 
 	public String get(String scon) {

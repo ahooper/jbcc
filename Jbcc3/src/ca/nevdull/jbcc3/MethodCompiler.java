@@ -2,7 +2,10 @@ package ca.nevdull.jbcc3;
 
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.ArrayList;
 import java.util.Formatter;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 
 import org.objectweb.asm.Handle;
@@ -14,7 +17,9 @@ import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
 import org.objectweb.asm.tree.analysis.Analyzer;
 import org.objectweb.asm.tree.analysis.AnalyzerException;
 import org.objectweb.asm.tree.analysis.BasicInterpreter;
@@ -30,7 +35,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 	private ClassCache classCache;
 
 	private String[] argIsInterface;
-	private boolean methodIsSynchronized;
+	private String methodIsSynchronized;
 	
 	MethodCompiler(ClassCache classCache) {
 		super(Opcodes.ASM5, null);
@@ -65,7 +70,6 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
         	}
         	out.println();
         }
-        //TODO exception handling
         
         if ((method.access & Opcodes.ACC_ABSTRACT) != 0) {
         	out.println("/*ABSTRACT*/");
@@ -89,21 +93,22 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		out.print(" ");
 		out.print(externalMethodName(classNode.name, method));
 		out.print("(");
+		out.print(ENV_TYPE+" "+ENV_ARG);
 
-		String sep = "";
 		argsEnd = 0;
 		int virtual = ((method.access & Opcodes.ACC_STATIC) == 0) ? 1 : 0;
 		argIsInterface = new String[method.maxLocals];
 		if ((method.access & Opcodes.ACC_STATIC) == 0) {
 			checkArgIsInterface(argsEnd,classNode);
+        	out.print(", ");
         	out.print(convertClassName(classNode.name)/*this*/);
-        	out.print(" ");  sep = ", ";
+        	out.print(" ");
         	out.print(FRAME);
         	out.print(argsEnd++);
         }
         for (int i = 0;  i < argTypes.length;  i++) {
 			checkArgIsInterface(argsEnd,argTypes[i]);
-        	out.print(sep);  sep = ", ";
+        	out.print(", ");
         	out.print(convertType(argTypes[i]));
         	out.print(" ");
         	out.print(FRAME);
@@ -123,7 +128,7 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		
 		int m = method.maxLocals + method.maxStack;
 		if (m > argsEnd) {
-			out.print(T_ANY);  sep = " ";
+			out.print(T_ANY);  String sep = " ";
 			for (int n = argsEnd;  n < m;  n++) {
 	        	out.print(sep);  sep = ", ";
 				out.print(FRAME+n);
@@ -131,9 +136,27 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			out.println(";");
 		}
 		
-		methodIsSynchronized = (method.access & Opcodes.ACC_SYNCHRONIZED) != 0;
-		if (methodIsSynchronized) {
-			// TODO monitorenter
+		tryStart.clear();  tryEnd.clear();
+		for (TryCatchBlockNode tryBlock : method.tryCatchBlocks) {
+        	out.println("\t// try "+makeLabel(tryBlock.start)+" "+makeLabel(tryBlock.end)+" "+makeLabel(tryBlock.handler)+" "+tryBlock.type);
+        	Label label = tryBlock.start.getLabel();
+        	ArrayList<TryCatchBlockNode> list = tryStart.get(label);
+        	if (list == null) {
+        		list = new ArrayList<TryCatchBlockNode>();
+        		tryStart.put(label, list);
+        		tryEnd.put(tryBlock.end.getLabel(), list);
+        	}
+        	list.add(tryBlock);
+        }
+		
+		methodIsSynchronized = null;
+		if ((method.access & Opcodes.ACC_SYNCHRONIZED) != 0) {
+			if ((method.access & Opcodes.ACC_STATIC) != 0) {
+				methodIsSynchronized = CLASS_STRUCT_PREFIX+convertClassName(classNode.name)+"."+CLASS_CLASS+"."+CLASS_KLASS;
+			} else {
+				methodIsSynchronized = FRAME+"0";
+			}
+			emit(LIB_MONITOR_ENTER+"("+methodIsSynchronized+");");
 		}
 		
 		InsnList ins = method.instructions;
@@ -389,8 +412,8 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void areturn(Type type) {
-		if (methodIsSynchronized) {
-			// TODO monitorexit
+		if (methodIsSynchronized != null) {
+			emit("// "+LIB_MONITOR_EXIT+"("+methodIsSynchronized+");");
 		}
 		if (type == Type.VOID_TYPE) emit("return;");
 		else emit("return "+stack(1,type)+";");
@@ -413,11 +436,11 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	@Override
 	public void athrow() {
-		if (methodIsSynchronized) {
-			// TODO monitorexit?
+		if (methodIsSynchronized != null) {
+			emit("// "+LIB_MONITOR_EXIT+"("+methodIsSynchronized+");");
 		}
 		emit(LIB_THROW+"("+stack(1,OBJECT_PSEUDO_TYPE)+");");
-		emit("/*NOTREACHED*/ // control reaches end of non-void function");
+		emit("/*NOTREACHED*/__builtin_unreachable(); // control reaches end of non-void function"); // clang and gcc
 	}
 
 	@Override
@@ -748,7 +771,59 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		return escapeName(owner);
 	}
 
+	static HashSet<String> CKeyword = new HashSet<String>();
+	static {
+		// really only need the C keywords that are not also Java keywords
+		CKeyword.add("auto");
+		CKeyword.add("break");
+		CKeyword.add("case");
+		CKeyword.add("char");
+		CKeyword.add("const");
+		CKeyword.add("continue");
+		CKeyword.add("default");
+		CKeyword.add("do");
+		CKeyword.add("double");
+		CKeyword.add("else");
+		CKeyword.add("enum");
+		CKeyword.add("extern");
+		CKeyword.add("float");
+		CKeyword.add("for");
+		CKeyword.add("goto");
+		CKeyword.add("if");
+		CKeyword.add("inline");
+		CKeyword.add("int");
+		CKeyword.add("long");
+		CKeyword.add("register");
+		CKeyword.add("restrict");
+		CKeyword.add("return");
+		CKeyword.add("short");
+		CKeyword.add("signed");
+		CKeyword.add("sizeof");
+		CKeyword.add("static");
+		CKeyword.add("struct");
+		CKeyword.add("switch");
+		CKeyword.add("typedef");
+		CKeyword.add("union");
+		CKeyword.add("unsigned");
+		CKeyword.add("void");
+		CKeyword.add("volatile");
+		CKeyword.add("while");
+			
+		CKeyword.add("_Alignas");
+		CKeyword.add("_Alignof");
+		CKeyword.add("_Atomic");
+		CKeyword.add("_Bool");
+		CKeyword.add("_Complex");
+		CKeyword.add("_Generic");
+		CKeyword.add("_Imaginary");
+		CKeyword.add("_Noreturn");
+		CKeyword.add("_Static_assert");
+		CKeyword.add("_Thread_local");
+		
+		CKeyword.add("asm"); 
+	}
 	public static String escapeName(String name) {
+		if (CKeyword.contains(name)) return name+"_";
 		StringBuilder sb = new StringBuilder();
 		Formatter formatter = null;  // only created if needed
 		int w = 0, l = name.length();
@@ -953,23 +1028,20 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 			ref = stack(++d,OBJECT_PSEUDO_TYPE);
 			argList[0] = ref;
 			emitReferenceCheck(ref);
-			//TODO monitorenter on ref if synchronized method
 			prefix = "(("+ownerType+")"+ref+")->"+OBJECT_CLASS+"->"+CLASS_METHOD_TABLE+".";
 			break;
 		case INTERFACE:
 			ref = stack(++d,OBJECT_PSEUDO_TYPE); //TODO INTERFACE_PSEUDO_TYPE
 			argList[0] = ref;
 			emitReferenceCheck(ref);
-			//TODO monitorenter on ref if synchronized method
 			prefix = "((struct "+METHOD_STRUCT_PREFIX+ownerType+"*)"+stack(d,FRAME_ANY,1)+FRAME_REFER_METHODS+")->";
 			break;
 		}
-		call.append(prefix).append(convertMethodName(name,desc)).append("(");
-		String sep = "";
+		call.append(prefix).append(convertMethodName(name,desc)).append("(")
+			.append(ENV_ARG);
 		for (int i = 0;  i < argList.length;  ++i) {
-			call.append(sep);  sep = ",";
 			String argVal = argList[i];
-			call.append(argVal);
+			call.append(",").append(argVal);
 		}
 		call.append(")");
 		if (retType == Type.VOID_TYPE) {
@@ -1012,6 +1084,10 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 
 	static int switchCount = 0;
 
+	private HashMap<Label,ArrayList<TryCatchBlockNode>> tryStart = new HashMap<Label,ArrayList<TryCatchBlockNode>>();
+
+	private HashMap<Label,ArrayList<TryCatchBlockNode>> tryEnd = new HashMap<Label,ArrayList<TryCatchBlockNode>>();
+
 	@Override
 	public void lookupswitch(Label defalt, int[] matches, Label[] targets) {
 		String tableName = "switchTable"+(switchCount++);
@@ -1021,13 +1097,40 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
         	table.append(sep).append("{").append(matches[i]).append(",&&").append(makeLabel(targets[i])).append("}");
         	sep = ",";
         }
-		emit("static "+SWITCH_PAIR+" "+tableName+"[] = {"+table+"};");
+		emit("static "+SWITCH_PAIR_TYPE+" "+tableName+"[] = {"+table+"};");
 		emit("goto *"+LIB_LOOKUPSWITCH+"("+stack(1,Type.INT_TYPE)+", "+matches.length+", "+tableName+", &&"+makeLabel(defalt)+");");
 	}
 
 	@Override
 	public void mark(Label label) {
 		emit(makeLabel(label)+": ;");
+		ArrayList<TryCatchBlockNode> tryList = tryStart.get(label);
+		if (tryList != null) {
+			Label startLabel = tryList.get(0).start.getLabel();
+			String listName = CATCH_LIST_PREFIX+makeLabel(startLabel);
+			StringBuilder list = new StringBuilder();
+			String sep = "";
+			for (TryCatchBlockNode tryBlock : tryList) {
+	        	out.println("\t// try "+makeLabel(tryBlock.start)+" "+makeLabel(tryBlock.end)+" "+makeLabel(tryBlock.handler)+" "+tryBlock.type);
+				list.append(sep).append("{");
+	        	String type = tryBlock.type;
+	        	if (type == null) list.append(NULL_REFERENCE);
+	        	else list.append("&").append(CLASS_STRUCT_PREFIX).append(convertClassName(type));
+				list.append(",&&").append(makeLabel(tryBlock.handler)).append("}");
+	        	sep = ",";
+	        }
+        	list.append(sep).append("{0,0}");
+        	sep = ",";
+			emit("static "+CATCH_LIST_TYPE+" "+listName+"[] = {"+list+"};");
+			emit(CATCH_PUSH+"("+ENV_ARG+","+listName+");");
+		}
+		tryList = tryEnd.get(label);
+		if (tryList != null) {
+			Label startLabel = tryList.get(0).start.getLabel();
+			String listName = CATCH_LIST_PREFIX+makeLabel(startLabel);
+			out.println("\t// try end "+makeLabel(startLabel));
+			emit(CATCH_POP+"("+ENV_ARG+","+listName+");");			
+		}
 	}
 
 	@Override
@@ -1250,12 +1353,12 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
         	table.append(sep).append("&&").append(makeLabel(targets[i-low]));
         	sep = ",";
         }
-		emit("static "+LABEL_PTR+" "+tableName+"[] = {"+table+"};");
+		emit("static "+LABEL_PTR_TYPE+" "+tableName+"[] = {"+table+"};");
 		String s = stack(1,Type.INT_TYPE);
 		String dflt = makeLabel(defalt);
 		emit("if ("+s+" < "+low+") goto "+dflt+";");
 		emit("if ("+s+" > "+high+") goto "+dflt+";");
-		emit("goto *"+tableName+"["+s+"-"+low+"];");
+		emit("goto *"+tableName+"["+s+"-("+low+")];");
 	}
 
 	@Override
@@ -1268,13 +1371,17 @@ public class MethodCompiler extends InstructionAdapter implements CCode {
 		shift(type," >> ",false);
 	}
 
+	@Override
+	public void xor(Type type) {
+		dyadic(type," ^ ");
+	}
+
 	public static String makeLabel(Label label) {
 		return "L"+Integer.toString(System.identityHashCode(label),36);
 	}
 
-	@Override
-	public void xor(Type type) {
-		dyadic(type," ^ ");
+	private static String makeLabel(LabelNode labelNode) {
+		return makeLabel(labelNode.getLabel());
 	}
 
 	private void unimplemented(String string) {

@@ -24,6 +24,7 @@ import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.TryCatchBlockNode;
 import org.objectweb.asm.tree.analysis.AnalyzerException;
 
 public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
@@ -118,6 +119,12 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
     			referenceType(argType);
     		}
 			referenceType(Type.getReturnType(method.desc));
+	        for (TryCatchBlockNode tryBlock : method.tryCatchBlocks) {
+	        	if (tryBlock.type != null) {
+	        		referenceTypeClass(tryBlock.type);
+	        	}
+	        }
+
             //if (   /*(method.access & Opcodes.ACC_STATIC) != 0
             //	&& */(method.access & Opcodes.ACC_PRIVATE) == 0) {
         	// inheriting classes need all the method declarations to complete their
@@ -427,15 +434,15 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 	private void putStaticStringValue(String string) {
 		String stringID = staticStringID(string);
 		
-		out.println("struct Char_array "+stringID+"_value = {");
-		out.println("    ."+OBJECT_CLASS+" = &c_Array_Char,");
+		out.println(CHAR_ARRAY_TYPE+" "+stringID+"_value = {");
+		out.println("    ."+OBJECT_CLASS+" = &"+CLASS_STRUCT_PREFIX+T_ARRAY_+CCode.T_CHAR+",");
 		out.println("    ."+ARRAY_LENGTH+" = "+string.length()+",");
 		out.print("    ."+ARRAY_ELEMENTS+" = ");
 		methodCompiler.stringCons.putStringCharArray(string, "};");  // modularization boundary hack!
 		
-		out.println("struct o_java_lang_String "+stringID+" = {");
+		out.println("struct "+OBJECT_STRUCT_PREFIX+JAVA_LANG_STRING+" "+stringID+" = {");
 		//NOTE this must match the layout in classpath java/lang/String.h
-		out.println("    ."+OBJECT_CLASS+" = &c_java_lang_String,");
+		out.println("    ."+OBJECT_CLASS+" = &"+CLASS_STRUCT_PREFIX+JAVA_LANG_STRING+",");
 		out.println("    .value = &"+stringID+"_value,");
 		out.println("    .count = "+string.length()+",");
 		out.println("    .cachedHashCode = 0,");
@@ -537,57 +544,6 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		//TODO attributes
 	}
 
-	//OBSOLETE
-	private LinkedHashMap<String,String> inheritedMethodTable(ClassNode cn, boolean fromInterface, boolean silent) throws FileNotFoundException, ClassNotFoundException, IOException {
-		LinkedHashMap<String,String> table;
-		
-		// start with superclass methods
-		if (cn.superName == null || fromInterface) {
-			table = new LinkedHashMap<String,String>();
-		} else  {
-			table = inheritedMethodTable(classCache.get(cn.superName), fromInterface, silent);
-		}
-		// interface methods
-		for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
-		    String intfc = cn.interfaces.get(ix);
-		    LinkedHashMap<String, String> it = inheritedMethodTable(classCache.get(intfc), true/*fromInterface*/, true);
-		    for (Entry<String, String> itEnt : it.entrySet() ) {
-		        String nameAndDesc = itEnt.getKey();
-		        if (!table.containsKey(nameAndDesc)) {
-		        	//if (Main.opt_debug) System.out.println("    "+cn.name+" include interface "+intfc+" "+nameAndDesc);
-		        	table.put(nameAndDesc, itEnt.getValue());
-		        }
-		    }
-		}
-		// class member methods
-		String convClassName = MethodCompiler.convertClassName(cn.name);
-		for (int mx = 0; mx < cn.methods.size(); ++mx) {
-		    MethodNode method = cn.methods.get(mx);
-			if ((method.access & Opcodes.ACC_STATIC) == 0) {
-		        String nameAndDesc = method.name + method.desc;
-		        // TODO signature polymorphic methods 
-		        String override = "";
-		        if (table.containsKey(nameAndDesc)) {
-		        	if (fromInterface) continue;  // don't override with a method from an interface
-		        	override = "/*override-incompatible pointer types*/";
-		        } else {
-		        	if (!silent) {
-			        	//if (Main.opt_debug) System.out.println("    "+cn.name+" member "+nameAndDesc);
-			    		out.print("    ");
-			    		declareMethodPointer(cn.name, method, convClassName);
-		        	}
-		        }
-		        String extName = MethodCompiler.externalMethodName(cn.name, method);
-				if ((method.access & Opcodes.ACC_ABSTRACT) != 0) {
-		        	table.put(nameAndDesc, METHOD_ABSTRACT+"/*"+extName+"*/");
-		        } else  {
-		        	table.put(nameAndDesc, override+"&"+extName);
-		 		}
-			}
-		}
-		return table;
-	}
-
  	private void collectInheritedMethods(LinkedHashMap<String,String> prototypes,
 										 LinkedHashMap<String,String> instances,
 										 ClassNode cn,
@@ -635,28 +591,6 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		 		}
 			}
 		}
-	}
- 
-	//OBSOLETE
- 	private LinkedHashMap<String, String> inheritedInterfaceTable(ClassNode cn, String intfc) throws FileNotFoundException, ClassNotFoundException, IOException {
-		LinkedHashMap<String, String> table = inheritedMethodTable(classCache.get(intfc), true/*fromInterface*/, true/*silent*/);
-		for (int mx = 0; mx < cn.methods.size(); ++mx) {
-		    MethodNode method = cn.methods.get(mx);
-			if ((method.access & Opcodes.ACC_STATIC) == 0) {
-		        String nameAndDesc = method.name + method.desc;
-		        if (table.containsKey(nameAndDesc)) {
-		        	//only add if required in interface
-		        	String override = "/*override-incompatible pointer types*/";
-			        String extName = MethodCompiler.externalMethodName(cn.name, method);
-					if ((method.access & Opcodes.ACC_ABSTRACT) != 0) {
-			        	table.put(nameAndDesc, METHOD_ABSTRACT+"/*"+extName+"*/");
-			        } else  {
-			        	table.put(nameAndDesc, override+"&"+extName);
-			 		}
-		        }
-			}
-		}
-		return table;
 	}
 
 	private void collectInterfaceMethods(LinkedHashMap<String,String> prototypes,
@@ -762,6 +696,11 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
     			references.typeReference(argType);
     		}
     		references.typeReference(Type.getReturnType(method.desc));
+	        for (TryCatchBlockNode tryBlock : method.tryCatchBlocks) {
+	        	if (tryBlock.type != null) {
+	        		references.classReference(tryBlock.type);
+	        	}
+	        }
         }
 		for (int ix = 0; ix < cn.interfaces.size(); ++ix) {
             String intfc = cn.interfaces.get(ix);
@@ -786,22 +725,16 @@ public class ClassCompiler /*extends ClassVisitor*/ implements Opcodes, CCode {
 		out.print("extern ");
 		out.println(methodPrototype(MethodCompiler.externalMethodName(className, method), method, MethodCompiler.convertClassName(className)));
 	}
-    
-	private void declareMethodPointer(String className, MethodNode method, String thisType) {
-		out.println(methodPrototype("(*"+MethodCompiler.convertMethodName(method.name,method.desc)+")", method, thisType));
-	}
 
 	private String methodPrototype(String name, MethodNode method, String thisType) {
 		StringBuilder r = new StringBuilder();
-		r.append(MethodCompiler.convertType(Type.getReturnType(method.desc))+" "+name+"(");
-		String sep = "";
+		r.append(MethodCompiler.convertType(Type.getReturnType(method.desc))+" "+name+"(")
+			.append(ENV_TYPE);
     	if ((method.access & Opcodes.ACC_STATIC) == 0) {
-    		r.append(thisType);
-			sep = ",";
+    		r.append(",").append(thisType);
 		}
 		for (Type argType : Type.getArgumentTypes(method.desc)) {
-			r.append(sep);  sep = ",";
-			r.append(MethodCompiler.convertType(argType));
+			r.append(",").append(MethodCompiler.convertType(argType));
 		}
 		r.append(");");
 		return r.toString();

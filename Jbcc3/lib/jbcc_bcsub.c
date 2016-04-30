@@ -2,7 +2,7 @@
  */
 #include "jbcc.h"
 
-Int jbcc_idiv(Int op1, Int op2) {
+jint jbcc_idiv(jint op1, jint op2) {
 	if (op2 != 0) {
 		if (op2 != -1) return op1 / op2;
 		return op1 * op2;
@@ -10,7 +10,7 @@ Int jbcc_idiv(Int op1, Int op2) {
 	jbcc_throwArithmeticException();
 }
 
-Long jbcc_ldiv(Long op1, Long op2) {
+jlong jbcc_ldiv(jlong op1, jlong op2) {
 	if (op2 != 0) {
 		if (op2 != -1) return op1 / op2;
 		return op1 * op2;
@@ -18,7 +18,7 @@ Long jbcc_ldiv(Long op1, Long op2) {
 	jbcc_throwArithmeticException();
 }
 
-Int jbcc_irem(Int op1, Int op2) {
+jint jbcc_irem(jint op1, jint op2) {
 	if (op2 != 0) {
 		if (op2 != -1) return op1 % op2;
 		return 0;
@@ -26,7 +26,7 @@ Int jbcc_irem(Int op1, Int op2) {
 	jbcc_throwArithmeticException();
 }
 
-Long jbcc_lrem(Long op1, Long op2) {
+jlong jbcc_lrem(jlong op1, jlong op2) {
 	if (op2 != 0) {
 		if (op2 != -1) return op1 % op2;
 		return 0L;
@@ -34,35 +34,35 @@ Long jbcc_lrem(Long op1, Long op2) {
 	jbcc_throwArithmeticException();
 }
 
-Int jbcc_d2i(Double op) {
+jint jbcc_d2i(jdouble op) {
     if (op != op) return 0L;		// %op == NaN
-    if (op >= Int_MAX) return Int_MAX;
-    if (op <= Int_MIN) return Int_MIN;
-    return (Int) op;
+    if (op >= jint_MAX) return jint_MAX;
+    if (op <= jint_MIN) return jint_MIN;
+    return (jint) op;
 }
 
-Long jbcc_d2l(Double op) {
+jlong jbcc_d2l(jdouble op) {
     if (op != op) return 0L;		// %op == NaN
-    if (op >= Long_MAX) return Long_MAX;
-    if (op <= Long_MIN) return Long_MIN;
-    return (Long) op;
+    if (op >= jlong_MAX) return jlong_MAX;
+    if (op <= jlong_MIN) return jlong_MIN;
+    return (jlong) op;
 }
 
-Int jbcc_f2i(Float op) {
+jint jbcc_f2i(jfloat op) {
     if (op != op) return 0;		// %op == NaN
-    if (op >= Int_MAX) return Int_MAX;
-    if (op <= Int_MIN) return Int_MIN;
-    return (Int) op;
+    if (op >= jint_MAX) return jint_MAX;
+    if (op <= jint_MIN) return jint_MIN;
+    return (jint) op;
 }
 
-Long jbcc_f2l(Float op) {
+jlong jbcc_f2l(jfloat op) {
     if (op != op) return 0L;		// %op == NaN
-    if (op >= Long_MAX) return Long_MAX;
-    if (op <= Long_MIN) return Long_MIN;
-    return (Long) op;
+    if (op >= jlong_MAX) return jlong_MAX;
+    if (op <= jlong_MIN) return jlong_MIN;
+    return (jlong) op;
 }
 
-LabelPtr jbcc_lookupswitch(Int value, int length, SwitchPair table[], LabelPtr defalt) {
+LabelPtr jbcc_lookupswitch(jint value, int length, SwitchPair table[], LabelPtr defalt) {
 	// TODO use a binary search, since table is sorted
 	for (int i = 0;  i < length;  i++) {
 		if (table[i].v == value) return table[i].l;

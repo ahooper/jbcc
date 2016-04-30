@@ -31,27 +31,28 @@ public interface CCode {
 	static final String ARRAY_METHODS			= "ARRAY_METHODS";
 
 	static final String T_ARRAY_		= "Array_";
-	static final String T_BOOLEAN		= "Boolean";
-	static final String T_BYTE			= "Byte";
-	static final String T_CHAR			= "Char";
-	static final String T_DOUBLE		= "Double";
-	static final String T_FLOAT			= "Float";
-	static final String T_INT			= "Int";
-	static final String T_LONG			= "Long";
-	static final String T_SHORT			= "Short";
-	static final String T_VOID			= "Void";
+	static final String T_BOOLEAN		= "jboolean";
+	static final String T_BYTE			= "jbyte";
+	static final String T_CHAR			= "jchar";
+	static final String T_DOUBLE		= "jdouble";
+	static final String T_FLOAT			= "jfloat";
+	static final String T_INT			= "jint";
+	static final String T_LONG			= "jlong";
+	static final String T_SHORT			= "jshort";
+	static final String T_VOID			= "void";
 	static final String T_ANY			= "Any";
-	static final String T_OBJECT		= "Object";
+	static final String T_OBJECT		= "jobject";
 	static final String T_ARRAY_COMMON	= T_ARRAY_+"Common";
 
-	static final String LABEL_PTR		= "LabelPtr";
-	static final String SWITCH_PAIR		= "SwitchPair";
-	static final String STRING_CONST 	= "StringConst";
+	static final String LABEL_PTR_TYPE	= "LabelPtr";
+	static final String SWITCH_PAIR_TYPE = "SwitchPair";
+	static final String STRING_CONST_TYPE = "StringConst";
 
 	static final String ARRAY_ELEMENTS 	= "E";
 	static final String ARRAY_LENGTH 	= "length";
 	static final String ARRAY_HEAD	 	= "ARRAY_HEAD";
-
+	static final String CHAR_ARRAY_TYPE	= "struct "+T_CHAR+"_array";
+	
 	static final String STRING_CONSTANT_STRING = "S";
 	
 	static final String METHOD_ABSTRACT	= "ABSTRACT_METHOD";
@@ -107,12 +108,21 @@ public interface CCode {
 	static final String CLASS_INFO_METHOD_TYPE		= "struct Class_Method_Info";
 	static final String CLASS_INFO_UTF8Z_TYPE		= "Class_Info_UTF8z";
 
+	static final String JAVA_LANG_STRING			= "java_lang_String";
+	
+	static final String ENV_TYPE					= "jbcc_env";
+	static final String ENV_ARG						= "env";
+	static final String CATCH_LIST_TYPE				= "struct catch_entry";
+	static final String CATCH_LIST_PREFIX			= "catch";
+	static final String CATCH_PUSH					= "CATCH_PUSH";
+	static final String CATCH_POP					= "CATCH_POP";
+	
 	/** Get portion of string safe to include in a C // comment
 	 * 
 	 * @param s
 	 * @return
 	 */
-	static String safeString(String s) {
+	static String safeCommentSubstring(String s) {
 		int trouble = s.indexOf('\n');
 		if (trouble >= 0) s = s.substring(0,trouble);
 		trouble = s.indexOf('\r');
